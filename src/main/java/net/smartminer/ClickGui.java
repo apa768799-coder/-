@@ -6,45 +6,56 @@ import net.minecraft.text.Text;
 import net.minecraft.client.MinecraftClient;
 
 public class ClickGui extends Screen {
-    private final int COLOR_BG = 0xFF1E1E1E;       
-    private final int COLOR_SIDEBAR = 0xFF141414;  
-    private final int COLOR_ACCENT = 0xFF00AFFF;   
-    private final int COLOR_TEXT = 0xFFFFFFFF;     
-    private final int COLOR_TEXT_DIM = 0xFF888888; 
-    private final int COLOR_HOVER = 0xFF2C2C2C;    
-    private final int COLOR_TOGGLE_ON = 0xFF00FF00;  
-    private final int COLOR_TOGGLE_OFF = 0xFF444444; 
+    private final int COLOR_BG_TOP = 0xE6151515;
+    private final int COLOR_BG_BOTTOM = 0xE50A0A0A;
+    private final int COLOR_SIDEBAR = 0xE5101010;
+    private final int COLOR_ACCENT = 0xFF00FFFF; 
+    private final int COLOR_TEXT = 0xFFFFFFFF;
+    private final int COLOR_TEXT_DIM = 0xFFAAAAAA;
+    private final int COLOR_HOVER = 0x40FFFFFF;
+    private final int COLOR_TOGGLE_ON = 0xFF00FF00;
+    private final int COLOR_TOGGLE_OFF = 0xFF333333;
 
     private int currentTab = 0; // 0=Combat, 1=Movement, 2=Render, 3=Player, 4=Logs
+
+    private int menuX, menuY;
+    private boolean isDragging = false;
+    private int dragOffsetX, dragOffsetY;
+
+    private final int MENU_WIDTH = 460;
+    private final int MENU_HEIGHT = 300;
 
     public ClickGui() {
         super(Text.literal("Smart Client Menu"));
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.fill(0, 0, this.width, this.height, 0x80000000);
-        
-        int cx = this.width / 2;
-        int cy = this.height / 2;
-        int menuW = 450; // Шире для логов
-        int menuH = 280;
-        int x1 = cx - menuW / 2;
-        int y1 = cy - menuH / 2;
-        int x2 = cx + menuW / 2;
-        int y2 = cy + menuH / 2;
+    protected void init() {
+        if (menuX == 0 && menuY == 0) {
+            menuX = (this.width - MENU_WIDTH) / 2;
+            menuY = (this.height - MENU_HEIGHT) / 2;
+        }
+    }
 
-        context.fill(x1 + 5, y1 + 5, x2 + 5, y2 + 5, 0x60000000);
-        context.fill(x1, y1, x2, y2, COLOR_BG);
-        context.drawBorder(x1, y1, menuW, menuH, COLOR_ACCENT);
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        this.renderBackground(context, mouseX, mouseY, delta);
+
+        int x1 = menuX;
+        int y1 = menuY;
+        int x2 = x1 + MENU_WIDTH;
+        int y2 = y1 + MENU_HEIGHT;
+
+        context.fill(x1 + 10, y1 + 10, x2 + 10, y2 + 10, 0x60000000);
+        context.fillGradient(x1, y1, x2, y2, COLOR_BG_TOP, COLOR_BG_BOTTOM);
+        context.drawBorder(x1, y1, MENU_WIDTH, MENU_HEIGHT, COLOR_ACCENT);
 
         int catWidth = 130;
-        context.fill(x1, y1, x1 + catWidth, y2, COLOR_SIDEBAR); 
-        context.fill(x1 + catWidth, y1, x1 + catWidth + 1, y2, 0xFF000000);
+        context.fill(x1, y1, x1 + catWidth, y2, COLOR_SIDEBAR);
+        context.fill(x1 + catWidth, y1, x1 + catWidth + 1, y2, 0xFF222222);
 
-        context.drawText(this.textRenderer, "§lSMART", x1 + 15, y1 + 20, COLOR_ACCENT, false);
-        context.drawText(this.textRenderer, "§lCLIENT", x1 + 15, y1 + 32, COLOR_TEXT, false);
-        context.drawText(this.textRenderer, "§8v35.0", x1 + 15, y1 + 44, COLOR_TEXT_DIM, false);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§lSMART", x1 + catWidth / 2, y1 + 20, COLOR_ACCENT);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§lCLIENT §7v120", x1 + catWidth / 2, y1 + 32, COLOR_TEXT);
 
         drawCategory(context, "Combat", 0, y1 + 80, mouseX, mouseY, x1);
         drawCategory(context, "Movement", 1, y1 + 105, mouseX, mouseY, x1);
@@ -55,85 +66,88 @@ public class ClickGui extends Screen {
         int startX = x1 + catWidth + 20;
         int startY = y1 + 20;
         int modStartY = startY + 30;
-        int x2Pos = cx + (menuW / 2);
+        int x2Pos = x2;
 
-        if (currentTab == 0) { 
+        if (currentTab == 0) { // COMBAT
             context.drawText(this.textRenderer, "§l§fБОЙ", startX, startY, COLOR_TEXT, false);
-            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            drawModule(context, "KillAura", SmartClient.modules.killAura, startX, modStartY, x2Pos, mouseX, mouseY);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
+            drawModule(context, "KillAura [J]", SmartClient.modules.killAura, startX, modStartY, x2Pos, mouseX, mouseY);
+            drawModule(context, "AutoTotem [T]", SmartClient.modules.autoTotem, startX, modStartY + 30, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 1) { 
-            context.drawText(this.textRenderer, "§l§fФАРМ", startX, startY, COLOR_TEXT, false);
-            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            drawModule(context, "AutoMine", SmartClient.modules.autoMine, startX, modStartY, x2Pos, mouseX, mouseY);
+        else if (currentTab == 1) { // MOVEMENT
+            context.drawText(this.textRenderer, "§l§fДВИЖЕНИЕ", startX, startY, COLOR_TEXT, false);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
             
-            context.drawText(this.textRenderer, "§7Руда:", startX, modStartY + 30, COLOR_TEXT_DIM, false);
+            drawModule(context, "AutoMine [R]", SmartClient.modules.autoMine, startX, modStartY, x2Pos, mouseX, mouseY);
+            context.drawText(this.textRenderer, "§7Цель:", startX, modStartY + 30, COLOR_TEXT_DIM, false);
             context.drawText(this.textRenderer, "§e" + SmartClient.modules.oreNames[SmartClient.modules.targetOreIndex], startX + 35, modStartY + 30, COLOR_TEXT, false);
             boolean hoverLeft = isHovered(mouseX, mouseY, x2Pos - 60, modStartY + 26, 15, 15);
             boolean hoverRight = isHovered(mouseX, mouseY, x2Pos - 40, modStartY + 26, 15, 15);
             context.drawText(this.textRenderer, hoverLeft ? "§a<" : "§7<", x2Pos - 60, modStartY + 30, COLOR_TEXT, false);
             context.drawText(this.textRenderer, hoverRight ? "§a>" : "§7>", x2Pos - 40, modStartY + 30, COLOR_TEXT, false);
 
-            drawModule(context, "AutoFish", SmartClient.modules.autoFish, startX, modStartY + 60, x2Pos, mouseX, mouseY);
+            drawModule(context, "AutoFish [F]", SmartClient.modules.autoFish, startX, modStartY + 60, x2Pos, mouseX, mouseY);
             drawModule(context, "Scaffold", SmartClient.modules.scaffold, startX, modStartY + 90, x2Pos, mouseX, mouseY);
+            drawModule(context, "NoFall", SmartClient.modules.noFall, startX, modStartY + 120, x2Pos, mouseX, mouseY);
+            drawModule(context, "Sprint", SmartClient.modules.sprint, startX, modStartY + 150, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 2) { 
+        else if (currentTab == 2) { // RENDER
             context.drawText(this.textRenderer, "§l§fВИЗУАЛЫ", startX, startY, COLOR_TEXT, false);
-            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            drawModule(context, "FullBright", SmartClient.modules.fullBright, startX, modStartY, x2Pos, mouseX, mouseY);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
+            drawModule(context, "FullBright [V]", SmartClient.modules.fullBright, startX, modStartY, x2Pos, mouseX, mouseY);
+            drawModule(context, "PlayerESP [P]", SmartClient.modules.playerESP, startX, modStartY + 30, x2Pos, mouseX, mouseY);
+            drawModule(context, "X-Ray [X]", SmartClient.modules.xray, startX, modStartY + 60, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 3) { 
+        else if (currentTab == 3) { // PLAYER
             context.drawText(this.textRenderer, "§l§fИГРОК", startX, startY, COLOR_TEXT, false);
-            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            drawModule(context, "Anti-AFK", SmartClient.modules.antiAfk, startX, modStartY, x2Pos, mouseX, mouseY);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
+            drawModule(context, "Anti-AFK [K]", SmartClient.modules.antiAfk, startX, modStartY, x2Pos, mouseX, mouseY);
             drawModule(context, "AutoArmor", SmartClient.modules.autoArmor, startX, modStartY + 30, x2Pos, mouseX, mouseY);
-            drawModule(context, "Velocity", SmartClient.modules.velocity, startX, modStartY + 60, x2Pos, mouseX, mouseY);
-            drawModule(context, "ChestStealer", SmartClient.modules.chestStealer, startX, modStartY + 90, x2Pos, mouseX, mouseY);
+            drawModule(context, "ChestStealer", SmartClient.modules.chestStealer, startX, modStartY + 60, x2Pos, mouseX, mouseY);
+            drawModule(context, "Velocity", SmartClient.modules.velocity, startX, modStartY + 90, x2Pos, mouseX, mouseY);
+            drawModule(context, "AutoRespawn", SmartClient.modules.autoRespawn, startX, modStartY + 120, x2Pos, mouseX, mouseY);
+            drawModule(context, "FastPlace", SmartClient.modules.fastPlace, startX, modStartY + 150, x2Pos, mouseX, mouseY);
         }
-        else if (currentTab == 4) {
-            // ВКЛАДКА ЛОГОВ
-            context.drawText(this.textRenderer, "§l§fЛОГИ (Последние события)", startX, startY, COLOR_TEXT, false);
-            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
+        else if (currentTab == 4) { // LOGS
+            context.drawText(this.textRenderer, "§l§fЛОГИ", startX, startY, COLOR_TEXT, false);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
 
             int logY = startY + 20;
-            // Выводим последние 18 логов
             int startLogIndex = Math.max(0, SmartClient.logs.size() - 18);
             for (int i = startLogIndex; i < SmartClient.logs.size(); i++) {
                 String log = SmartClient.logs.get(i);
-                // Обрезаем длинные строки
                 if (log.length() > 60) log = log.substring(0, 57) + "...";
                 
-                // Красим логи в зависимости от события
                 int color = 0xFFAAAAAA;
-                if (log.contains("Найдена")) color = 0xFF00FF00; // Зеленый
-                else if (log.contains("Добываю")) color = 0xFF00FFFF; // Голубой
-                else if (log.contains("Приват") || log.contains("Препятствие")) color = 0xFFFF5555; // Красный
-                else if (log.contains("Сбор лута")) color = 0xFFFFAA00; // Оранжевый
+                if (log.contains("Найдена")) color = 0xFF00FF00; 
+                else if (log.contains("Добываю")) color = 0xFF00FFFF; 
+                else if (log.contains("Приват") || log.contains("Опасность")) color = 0xFFFF5555; 
+                else if (log.contains("Сбор лута")) color = 0xFFFFAA00; 
 
                 context.drawText(this.textRenderer, log, startX, logY, color, false);
                 logY += 12;
             }
         }
 
-        context.drawText(this.textRenderer, "§8Right Shift - закрыть", cx - 60, y2 - 15, 0x555555, false);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§8Right Shift - закрыть | ЛКМ на шапку - перетащить", x1 + (MENU_WIDTH/2), y2 - 15, 0x555555);
     }
 
     private void drawCategory(DrawContext context, String name, int tabIndex, int y, int mouseX, int mouseY, int x1) {
-        boolean hover = isHovered(mouseX, mouseY, x1 + 5, y - 3, 120, 16);
+        boolean hover = isHovered(mouseX, mouseY, x1, y - 5, 130, 20);
         boolean active = (currentTab == tabIndex);
 
         if (hover || active) {
-            context.fill(x1 + 5, y - 3, x1 + 125, y + 13, COLOR_HOVER);
-            context.fill(x1 + 5, y - 3, x1 + 7, y + 13, COLOR_ACCENT);
+            context.fill(x1, y - 5, x1 + 130, y + 15, COLOR_HOVER);
+            context.fill(x1, y - 5, x1 + 3, y + 15, COLOR_ACCENT);
         }
-        context.drawText(this.textRenderer, name, x1 + 15, y, (hover || active) ? 0xFFFFFFFF : 0xFFAAAAAA, false);
+        context.drawText(this.textRenderer, (active ? "§b" : "§7") + name, x1 + 15, y, COLOR_TEXT, false);
     }
 
     private void drawModule(DrawContext context, String name, boolean state, int x, int y, int x2, int mouseX, int mouseY) {
-        int toggleW = 26;
-        int toggleH = 12;
+        int toggleW = 30;
+        int toggleH = 14;
         int toggleX = x2 - 40 - toggleW; 
-        int toggleY = y - 2;
+        int toggleY = y - 3;
 
         boolean hoverRow = isHovered(mouseX, mouseY, x, y - 5, (x2 - x - 20), 20);
         if (hoverRow) context.fill(x - 5, y - 5, x2 - 20, y + 15, COLOR_HOVER);
@@ -142,53 +156,81 @@ public class ClickGui extends Screen {
         
         int bgColor = state ? COLOR_TOGGLE_ON : COLOR_TOGGLE_OFF;
         context.fill(toggleX, toggleY, toggleX + toggleW, toggleY + toggleH, bgColor);
-        int circleX = toggleX + (state ? toggleW - 10 : 2);
-        context.fill(circleX, toggleY + 2, circleX + 8, toggleY + 10, 0xFFFFFFFF);
+        int circleX = toggleX + (state ? toggleW - 12 : 2);
+        context.fill(circleX, toggleY + 2, circleX + 10, toggleY + 12, 0xFFFFFFFF);
         context.drawBorder(toggleX, toggleY, toggleW, toggleH, 0xFF000000);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 0 && isHovered(mouseX, mouseY, menuX, menuY, MENU_WIDTH, 40)) {
+            isDragging = true;
+            dragOffsetX = (int) (mouseX - menuX);
+            dragOffsetY = (int) (mouseY - menuY);
+            return true;
+        }
+
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
 
-        int cx = this.width / 2;
-        int cy = this.height / 2;
-        int x1 = cx - 225; // menuW / 2
-        int y1 = cy - 140;
+        int x1 = menuX;
+        int y1 = menuY;
 
-        if (isHovered(mouseX, mouseY, x1 + 5, y1 + 77, 120, 16)) currentTab = 0;
-        if (isHovered(mouseX, mouseY, x1 + 5, y1 + 102, 120, 16)) currentTab = 1;
-        if (isHovered(mouseX, mouseY, x1 + 5, y1 + 127, 120, 16)) currentTab = 2;
-        if (isHovered(mouseX, mouseY, x1 + 5, y1 + 152, 120, 16)) currentTab = 3;
-        if (isHovered(mouseX, mouseY, x1 + 5, y1 + 177, 120, 16)) currentTab = 4;
+        if (isHovered(mouseX, mouseY, x1, y1 + 75, 130, 20)) currentTab = 0;
+        if (isHovered(mouseX, mouseY, x1, y1 + 100, 130, 20)) currentTab = 1;
+        if (isHovered(mouseX, mouseY, x1, y1 + 125, 130, 20)) currentTab = 2;
+        if (isHovered(mouseX, mouseY, x1, y1 + 150, 130, 20)) currentTab = 3;
+        if (isHovered(mouseX, mouseY, x1, y1 + 175, 130, 20)) currentTab = 4;
 
         int startX = x1 + 130 + 20;
         int modStartY = y1 + 20 + 30;
-        int x2 = cx + 225;
-        int toggleX = x2 - 40 - 26;
+        int x2 = menuX + MENU_WIDTH;
+        int toggleX = x2 - 40 - 30;
 
         if (currentTab == 0) {
-            if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.killAura = !SmartClient.modules.killAura;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY - 3, 30, 14)) SmartClient.modules.killAura = !SmartClient.modules.killAura;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 27, 30, 14)) SmartClient.modules.autoTotem = !SmartClient.modules.autoTotem;
         } 
         else if (currentTab == 1) {
-            if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.autoMine = !SmartClient.modules.autoMine;
-            if (isHovered(mouseX, mouseY, toggleX, modStartY + 58, 26, 12)) SmartClient.modules.autoFish = !SmartClient.modules.autoFish;
-            if (isHovered(mouseX, mouseY, toggleX, modStartY + 88, 26, 12)) SmartClient.modules.scaffold = !SmartClient.modules.scaffold;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY - 3, 30, 14)) SmartClient.modules.autoMine = !SmartClient.modules.autoMine;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 57, 30, 14)) SmartClient.modules.autoFish = !SmartClient.modules.autoFish;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 87, 30, 14)) SmartClient.modules.scaffold = !SmartClient.modules.scaffold;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 117, 30, 14)) SmartClient.modules.noFall = !SmartClient.modules.noFall;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 147, 30, 14)) SmartClient.modules.sprint = !SmartClient.modules.sprint;
 
-            if (isHovered(mouseX, mouseY, x2 - 60, modStartY + 28, 15, 15)) SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex + 1) % SmartClient.modules.oreNames.length;
-            if (isHovered(mouseX, mouseY, x2 - 40, modStartY + 28, 15, 15)) SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex - 1 + SmartClient.modules.oreNames.length) % SmartClient.modules.oreNames.length;
+            if (isHovered(mouseX, mouseY, x2 - 60, modStartY + 26, 15, 15)) SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex + 1) % SmartClient.modules.oreNames.length;
+            if (isHovered(mouseX, mouseY, x2 - 40, modStartY + 26, 15, 15)) SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex - 1 + SmartClient.modules.oreNames.length) % SmartClient.modules.oreNames.length;
         }
         else if (currentTab == 2) {
-            if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.fullBright = !SmartClient.modules.fullBright;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY - 3, 30, 14)) SmartClient.modules.fullBright = !SmartClient.modules.fullBright;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 27, 30, 14)) SmartClient.modules.playerESP = !SmartClient.modules.playerESP;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 57, 30, 14)) SmartClient.modules.xray = !SmartClient.modules.xray;
         }
         else if (currentTab == 3) {
-            if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.antiAfk = !SmartClient.modules.antiAfk;
-            if (isHovered(mouseX, mouseY, toggleX, modStartY + 28, 26, 12)) SmartClient.modules.autoArmor = !SmartClient.modules.autoArmor;
-            if (isHovered(mouseX, mouseY, toggleX, modStartY + 58, 26, 12)) SmartClient.modules.velocity = !SmartClient.modules.velocity;
-            if (isHovered(mouseX, mouseY, toggleX, modStartY + 88, 26, 12)) SmartClient.modules.chestStealer = !SmartClient.modules.chestStealer;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY - 3, 30, 14)) SmartClient.modules.antiAfk = !SmartClient.modules.antiAfk;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 27, 30, 14)) SmartClient.modules.autoArmor = !SmartClient.modules.autoArmor;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 57, 30, 14)) SmartClient.modules.chestStealer = !SmartClient.modules.chestStealer;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 87, 30, 14)) SmartClient.modules.velocity = !SmartClient.modules.velocity;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 117, 30, 14)) SmartClient.modules.autoRespawn = !SmartClient.modules.autoRespawn;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 147, 30, 14)) SmartClient.modules.fastPlace = !SmartClient.modules.fastPlace;
         }
 
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button == 0) isDragging = false;
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        if (isDragging) {
+            menuX = (int) (mouseX - dragOffsetX);
+            menuY = (int) (mouseY - dragOffsetY);
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
     }
 
     private boolean isHovered(double mouseX, double mouseY, int x, int y, int w, int h) {
