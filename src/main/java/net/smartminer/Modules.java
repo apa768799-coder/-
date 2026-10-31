@@ -46,9 +46,11 @@ public class Modules {
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
 
+    // ИИ Состояния
+    public String currentState = "Ожидание";
     public BlockPos targetBlock = null;
     public BlockPos targetChest = null;
-    private ItemEntity targetItem = null; // Цель для сбора (дроп)
+    private ItemEntity targetItem = null;
 
     private int breakCooldown = 0;
     private int fishTimer = 0;
@@ -94,7 +96,6 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
-    // ================== ИСПРАВЛЕННЫЙ AUTO ARMOR 2.0 ==================
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
@@ -103,7 +104,6 @@ public class Modules {
                 if (equip != null && equip.slot().getType() == EquipmentSlot.Type.HUMANOID_ARMOR) {
                     EquipmentSlot slot = equip.slot();
                     ItemStack current = player.getEquippedStack(slot);
-                    
                     if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
                         int slotId = i < 9 ? i + 36 : i; 
                         client.interactionManager.clickSlot(player.playerScreenHandler.syncId, slotId, 0, SlotActionType.QUICK_MOVE, player);
@@ -126,11 +126,9 @@ public class Modules {
             player.closeHandledScreen();
             return;
         }
-
         if (targetChest == null || client.world.getBlockState(targetChest).isAir() || !(client.world.getBlockState(targetChest).getBlock() instanceof ChestBlock)) {
             targetChest = findNearestChest(client, player);
         }
-
         if (targetChest != null && player.getPos().distanceTo(Vec3d.ofCenter(targetChest)) < 4.0) {
             BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(targetChest), Direction.UP, targetChest, false);
             client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
@@ -152,9 +150,7 @@ public class Modules {
     }
 
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.isOnGround() || player.isTouchingWater()) return;
-        if (player.getVelocity().y > 0.1) return;
-
+        if (player.isOnGround() || player.isTouchingWater() || player.getVelocity().y > 0.1) return;
         BlockPos below = player.getBlockPos().down();
         if (client.world.getBlockState(below).isAir()) {
             for (int i = 0; i < 9; i++) {
@@ -170,7 +166,7 @@ public class Modules {
         }
     }
 
-    // ================== УМНЫЙ AUTOMINE + PICKUP ==================
+    // ================== ИИ AUTOMINE ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
@@ -182,44 +178,39 @@ public class Modules {
         }
 
         if (detourTicks > 0) {
+            currentState = "Обход препятствия";
             player.setYaw(player.getYaw() + (detourLeft ? -15 : 15));
             client.options.forwardKey.setPressed(true);
             return;
         }
 
-        // 1. СБОР ДРОПА (AutoPickup) - Приоритет выше, чем поиск руды
+        // 1. СБОР ДРОПА
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
-
         if (targetItem != null) {
-            double distToItem = player.getPos().distanceTo(targetItem.getPos());
-            
-            // Если предмет близко (меньше 1.3 блоков), игра его подберет сама
-            if (distToItem > 1.3) {
+            currentState = "Сбор лута";
+            double dist = player.getPos().distanceTo(targetItem.getPos());
+            if (dist > 1.3) {
                 lookAtEntity(player, targetItem);
                 client.options.forwardKey.setPressed(true);
-                if (targetItem.getY() > player.getY() + 0.5 && player.horizontalCollision) {
-                    client.options.jumpKey.setPressed(true);
-                } else {
-                    client.options.jumpKey.setPressed(false);
-                }
+                if (targetItem.getY() > player.getY() + 0.5 && player.horizontalCollision) client.options.jumpKey.setPressed(true);
+                else client.options.jumpKey.setPressed(false);
             } else {
                 client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false);
             }
-            return; // Пока не подберем предмет, руду не ищем!
+            return;
         }
 
-        // 2. ПОИСК И КОПАНИЕ РУДЫ
+        // 2. ПОИСК РУДЫ
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
+            currentState = "Поиск руды";
             targetBlock = findNearestOre(client, player);
         }
 
         if (targetBlock != null) {
             Vec3d eyePos = player.getEyePos();
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
-
             BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
             BlockPos hitBlock = hit.getBlockPos();
 
@@ -228,7 +219,9 @@ public class Modules {
                 return;
             }
 
+            // Копаем стену, если она мешает
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
+                currentState = "Копаю туннель";
                 double distToWall = player.getPos().distanceTo(Vec3d.ofCenter(hitBlock));
                 if (distToWall <= 4.5) {
                     client.options.forwardKey.setPressed(false);
@@ -249,13 +242,20 @@ public class Modules {
                 return; 
             }
 
+            // Идем к руде
             double distToOre = player.getPos().distanceTo(targetCenter);
             if (distToOre > 3.5) {
+                currentState = "Иду к руде";
                 if (canWalkForward(client, player)) {
                     lookAt(player, targetBlock);
                     client.options.forwardKey.setPressed(true);
-                    if (targetBlock.getY() > player.getY() + 0.5 && player.horizontalCollision) client.options.jumpKey.setPressed(true);
-                    else client.options.jumpKey.setPressed(false);
+                    
+                    // Умный прыжок (если руда выше)
+                    if (targetBlock.getY() > player.getY() + 0.5 && player.horizontalCollision) {
+                        client.options.jumpKey.setPressed(true);
+                    } else {
+                        client.options.jumpKey.setPressed(false);
+                    }
 
                     double moved = player.getPos().squaredDistanceTo(lastPos);
                     if (moved < 0.001) {
@@ -267,6 +267,8 @@ public class Modules {
                     startDetour(); 
                 }
             } else {
+                // Копаем руду
+                currentState = "Добываю " + oreNames[targetOreIndex];
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
@@ -277,29 +279,42 @@ public class Modules {
                 }
             }
         } else {
+            currentState = "Исследую местность";
             if (canWalkForward(client, player)) client.options.forwardKey.setPressed(true);
             else startDetour(); 
         }
     }
 
-    // ================== ПОИСК ДРОПА ==================
+    // ================== СКАНИРОВАНИЕ МЕСТНОСТИ ==================
+    private boolean canWalkForward(MinecraftClient client, ClientPlayerEntity player) {
+        BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
+        
+        // Проверка на пропасть (под блоком впереди должен быть блок)
+        BlockPos frontDown = front.down();
+        if (client.world.getBlockState(frontDown).isAir() || client.world.getBlockState(frontDown).getBlock() == Blocks.LAVA) {
+            return false; // Впереди обрыв или лава
+        }
+
+        // Проверка на стену выше 1 блока (если выше тоже блок, мы не перепрыгнем)
+        BlockPos frontUp = front.up();
+        if (!client.world.getBlockState(front).isAir() && !client.world.getBlockState(frontUp).isAir()) {
+            return false; // Слишком высокая стена
+        }
+
+        return true;
+    }
+
+    private void startDetour() {
+        detourTicks = 25; 
+        detourLeft = Math.random() > 0.5;
+    }
+
     private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
-        // Ищем предметы в радиусе 6 блоков (чтобы далеко не убегать)
         return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(6.0), 
             e -> e.isAlive() && !e.getStack().isEmpty())
             .stream()
             .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
             .orElse(null);
-    }
-
-    private boolean canWalkForward(MinecraftClient client, ClientPlayerEntity player) {
-        BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-        return !client.world.getBlockState(front.down()).isAir();
-    }
-
-    private void startDetour() {
-        detourTicks = 20; 
-        detourLeft = Math.random() > 0.5;
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
