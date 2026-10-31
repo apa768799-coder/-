@@ -10,6 +10,11 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
+import java.awt.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
 public class SmartClient implements ClientModInitializer {
     public static KeyBinding guiKey, mineKey, fishKey, xrayKey, afkKey;
     public static Modules modules = new Modules();
@@ -40,18 +45,41 @@ public class SmartClient implements ClientModInitializer {
             }
         });
 
+        // Красивый HUD (ArrayList)
         HudRenderCallback.EVENT.register((context, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
+            int screenWidth = client.getWindow().getScaledWidth();
             int y = 5;
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v5.0", 5, y, 0xFFFFFF);
-            y += 12;
-            if (modules.autoMine) { context.drawTextWithShadow(client.textRenderer, "§7AutoMine: §aON §8[" + modules.oreNames[modules.targetOreIndex] + "]", 5, y, 0xFFFFFF); y += 10; }
-            if (modules.autoFish) { context.drawTextWithShadow(client.textRenderer, "§7AutoFish: §aON", 5, y, 0xFFFFFF); y += 10; }
-            if (modules.killAura) { context.drawTextWithShadow(client.textRenderer, "§7KillAura: §aON", 5, y, 0xFFFFFF); y += 10; }
-            if (modules.fullBright) { context.drawTextWithShadow(client.textRenderer, "§7FullBright: §aON", 5, y, 0xFFFFFF); y += 10; }
-            if (modules.antiAfk) { context.drawTextWithShadow(client.textRenderer, "§7Anti-AFK: §aON", 5, y, 0xFFFFFF); }
+            
+            // Собираем активные модули
+            List<String> activeModules = new ArrayList<>();
+            if (modules.autoMine) activeModules.add("AutoMine §7[" + modules.oreNames[modules.targetOreIndex] + "]");
+            if (modules.autoFish) activeModules.add("AutoFish");
+            if (modules.killAura) activeModules.add("KillAura");
+            if (modules.fullBright) activeModules.add("FullBright");
+            if (modules.antiAfk) activeModules.add("Anti-AFK");
+            
+            // Сортируем по длине текста (чтобы было красиво)
+            activeModules.sort(Comparator.comparingInt(String::length).reversed());
+
+            // Рисуем водяной знак
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v12", 5, 5, 0xFFFFFF);
+
+            // Рисуем ArrayList справа
+            for (String mod : activeModules) {
+                int width = client.textRenderer.getWidth(mod);
+                int x = screenWidth - width - 5;
+                
+                // Задний фон (полупрозрачный черный)
+                context.fill(x - 2, y, screenWidth - 2, y + 10, 0x60000000);
+                // Неоновая полоска слева
+                context.fill(x - 2, y, x - 1, y + 10, 0xFF00FFFF); 
+                
+                context.drawTextWithShadow(client.textRenderer, mod, x, y + 1, 0xFFFFFF);
+                y += 11;
+            }
         });
     }
 
