@@ -53,20 +53,16 @@ public class Modules {
         else client.options.getGamma().setValue(1.0);
 
         // AutoSprint
-        if (player.isOnGround() && player.input.movementForward > 0) {
-            player.setSprinting(true);
-        }
+        if (player.isOnGround() && player.input.movementForward > 0) player.setSprinting(true);
 
         // Anti-AFK
         if (antiAfk) {
             afkTicks++;
-            if (afkTicks > 100) { 
+            if (afkTicks > 100) {
                 player.setYaw(player.getYaw() + (float)(Math.random() * 4 - 2));
                 if (Math.random() > 0.5) client.options.jumpKey.setPressed(true);
                 afkTicks = 0;
-            } else {
-                client.options.jumpKey.setPressed(false);
-            }
+            } else client.options.jumpKey.setPressed(false);
         }
 
         // Умная еда
@@ -88,6 +84,7 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
+        // Авто-выбор кирки
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -97,37 +94,47 @@ public class Modules {
             }
         }
 
-        double moved = player.getPos().squaredDistanceTo(lastPos);
-        if (moved < 0.001 && targetBlock != null) stuckTicks++;
-        else stuckTicks = 0;
-        lastPos = player.getPos();
-
-        if (stuckTicks > 15) {
-            client.options.jumpKey.setPressed(true);
-            if (stuckTicks % 20 == 0) {
-                client.options.leftKey.setPressed(!client.options.leftKey.isPressed());
-                client.options.rightKey.setPressed(!client.options.rightKey.isPressed());
-            }
-            BlockPos frontBlock = player.getBlockPos().offset(player.getHorizontalFacing());
-            if (!client.world.getBlockState(frontBlock).isAir() && breakCooldown <= 0) {
-                client.interactionManager.updateBlockBreakingProgress(frontBlock, Direction.UP);
-                player.swingHand(Hand.MAIN_HAND);
-                breakCooldown = 2;
-            }
-            return;
-        }
-
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             targetBlock = findNearestOre(client, player);
         }
 
         if (targetBlock != null) {
             double dist = player.getPos().distanceTo(Vec3d.ofCenter(targetBlock));
+            double yDiff = targetBlock.getY() - player.getY();
+            
             if (dist > 3.5) {
                 lookAt(player, targetBlock);
                 client.options.forwardKey.setPressed(true);
+                
+                // Умный прыжок (ТОЛЬКО если цель выше нас, а мы уперлись в стену)
+                if (yDiff > 1.0 && player.horizontalCollision && player.isOnGround()) {
+                    client.options.jumpKey.setPressed(true);
+                } 
+                // Если цель на той же высоте или ниже - не прыгаем
+                else {
+                    client.options.jumpKey.setPressed(false);
+                }
+
+                // Анти-Застревание (Если застряли и цель выше - копаем вверх/прыгаем)
+                double moved = player.getPos().squaredDistanceTo(lastPos);
+                if (moved < 0.001) {
+                    stuckTicks++;
+                    if (stuckTicks > 10) {
+                        // Если застряли и не можем прыгнуть - ломаем блок перед собой
+                        BlockPos frontBlock = player.getBlockPos().offset(player.getHorizontalFacing()).up();
+                        if (!client.world.getBlockState(frontBlock).isAir() && breakCooldown <= 0) {
+                            client.interactionManager.updateBlockBreakingProgress(frontBlock, Direction.UP);
+                            player.swingHand(Hand.MAIN_HAND);
+                            breakCooldown = 2;
+                        }
+                    }
+                } else stuckTicks = 0;
+                lastPos = player.getPos();
+
             } else {
+                // Мы у цели
                 client.options.forwardKey.setPressed(false);
+                client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
                 if (breakCooldown <= 0) {
                     client.interactionManager.updateBlockBreakingProgress(targetBlock, Direction.UP);
@@ -136,6 +143,8 @@ public class Modules {
                 }
             }
         } else {
+            // Руды нет - просто идем и не прыгаем
+            client.options.jumpKey.setPressed(false);
             client.options.forwardKey.setPressed(true);
         }
     }
@@ -180,16 +189,12 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            
-            // Рисуем рамку вокруг руды
             VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); 
 
-            // Линия (Tracer) - сделана через прямой вызов vertex
             if (MinecraftClient.getInstance().player != null) {
                 Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
                 Vec3d targetVec = Vec3d.ofCenter(targetBlock);
                 Matrix4f matrix = matrices.peek().getPositionMatrix();
-                
                 lines.vertex(matrix, (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
                 lines.vertex(matrix, (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
             }
