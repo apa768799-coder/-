@@ -1,12 +1,21 @@
 {
-  "required": true,
-  "minVersion": "0.8",
-  "package": "net.smartminer.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "schemaVersion": 1,
+  "id": "smartminer",
+  "version": "1.0.0",
+  "name": "Smart Miner",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "net.smartminer.SmartClient"
+    ]
+  },
   "mixins": [
-    "XRayMixin"
+    "smartminer.mixins.json"
   ],
-  "injectors": {
-    "defaultRequire": 1
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
   }
 }
