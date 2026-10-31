@@ -15,8 +15,7 @@ public class ClickGui extends Screen {
     private final int COLOR_TOGGLE_ON = 0xFF00FF00;  
     private final int COLOR_TOGGLE_OFF = 0xFF80848E; 
 
-    // 0 = Combat, 1 = Movement, 2 = Render, 3 = Player
-    private int currentTab = 1; 
+    private int currentTab = 0; // 0=Combat, 1=Movement, 2=Render, 3=Player
 
     public ClickGui() {
         super(Text.literal("Smart Client Menu"));
@@ -41,34 +40,29 @@ public class ClickGui extends Screen {
         context.drawBorder(x1, y1, menuW, menuH, COLOR_ACCENT);
         context.drawBorder(x1 - 1, y1 - 1, menuW + 2, menuH + 2, 0xFF000000);
 
-        // ---------------- ЛЕВАЯ ПАНЕЛЬ (ВКЛАДКИ) ----------------
         int catWidth = 100;
         context.fill(x1, y1, x1 + catWidth, y2, COLOR_SIDEBAR); 
         context.fill(x1 + catWidth, y1, x1 + catWidth + 1, y2, 0xFF000000);
 
         context.drawText(this.textRenderer, "§l§bSMART", x1 + 15, y1 + 20, COLOR_TEXT, false);
         context.drawText(this.textRenderer, "§l§fCLIENT", x1 + 15, y1 + 32, COLOR_TEXT, false);
-        context.drawText(this.textRenderer, "§8v10.0", x1 + 15, y1 + 44, COLOR_TEXT_DIM, false);
+        context.drawText(this.textRenderer, "§8v12.0", x1 + 15, y1 + 44, COLOR_TEXT_DIM, false);
 
         drawCategory(context, "Combat", 0, y1 + 80, mouseX, mouseY, x1);
         drawCategory(context, "Movement", 1, y1 + 105, mouseX, mouseY, x1);
         drawCategory(context, "Render", 2, y1 + 130, mouseX, mouseY, x1);
         drawCategory(context, "Player", 3, y1 + 155, mouseX, mouseY, x1);
 
-        // ---------------- ПРАВАЯ ПАНЕЛЬ (МОДУЛИ) ----------------
         int startX = x1 + catWidth + 20;
         int startY = y1 + 20;
         int modStartY = startY + 30;
         int x2Pos = cx + 190;
 
-        // Логика переключения вкладок
         if (currentTab == 0) { // COMBAT
             context.drawText(this.textRenderer, "§l§fБОЙ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            
             drawModule(context, "KillAura", SmartClient.modules.killAura, startX, modStartY, x2Pos, mouseX, mouseY);
-            
-        } else if (currentTab == 1) { // MOVEMENT (Farming)
+        } else if (currentTab == 1) { // MOVEMENT
             context.drawText(this.textRenderer, "§l§fФАРМ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             
@@ -83,17 +77,13 @@ public class ClickGui extends Screen {
             context.drawText(this.textRenderer, hoverRight ? "§a>" : "§7>", x2 - 40, modStartY + 30, COLOR_TEXT, false);
 
             drawModule(context, "AutoFish", SmartClient.modules.autoFish, startX, modStartY + 60, x2Pos, mouseX, mouseY);
-
         } else if (currentTab == 2) { // RENDER
             context.drawText(this.textRenderer, "§l§fВИЗУАЛЫ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            
             drawModule(context, "FullBright", SmartClient.modules.fullBright, startX, modStartY, x2Pos, mouseX, mouseY);
-
         } else if (currentTab == 3) { // PLAYER
             context.drawText(this.textRenderer, "§l§fИГРОК", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
-            
             drawModule(context, "Anti-AFK", SmartClient.modules.antiAfk, startX, modStartY, x2Pos, mouseX, mouseY);
         }
 
@@ -142,7 +132,6 @@ public class ClickGui extends Screen {
         int x1 = cx - 190; 
         int y1 = cy - 130;
 
-        // Клики по вкладкам
         if (isHovered(mouseX, mouseY, x1 + 5, y1 + 77, 90, 16)) currentTab = 0;
         if (isHovered(mouseX, mouseY, x1 + 5, y1 + 102, 90, 16)) currentTab = 1;
         if (isHovered(mouseX, mouseY, x1 + 5, y1 + 127, 90, 16)) currentTab = 2;
@@ -153,15 +142,13 @@ public class ClickGui extends Screen {
         int x2 = cx + 190;
         int toggleX = x2 - 40 - 26;
 
-        // Клики по модулям (в зависимости от вкладки)
-        if (currentTab == 0) { // Combat
+        if (currentTab == 0) {
             if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.killAura = !SmartClient.modules.killAura;
         } 
-        else if (currentTab == 1) { // Movement
+        else if (currentTab == 1) {
             if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.autoMine = !SmartClient.modules.autoMine;
             if (isHovered(mouseX, mouseY, toggleX, modStartY + 58, 26, 12)) SmartClient.modules.autoFish = !SmartClient.modules.autoFish;
 
-            // Стрелочки руды
             if (isHovered(mouseX, mouseY, x2 - 60, modStartY + 28, 15, 15)) {
                 SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex + 1) % SmartClient.modules.oreNames.length;
             }
@@ -169,10 +156,10 @@ public class ClickGui extends Screen {
                 SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex - 1 + SmartClient.modules.oreNames.length) % SmartClient.modules.oreNames.length;
             }
         }
-        else if (currentTab == 2) { // Render
+        else if (currentTab == 2) {
             if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.fullBright = !SmartClient.modules.fullBright;
         }
-        else if (currentTab == 3) { // Player
+        else if (currentTab == 3) {
             if (isHovered(mouseX, mouseY, toggleX, modStartY - 2, 26, 12)) SmartClient.modules.antiAfk = !SmartClient.modules.antiAfk;
         }
 
