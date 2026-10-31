@@ -3,6 +3,8 @@ package net.smartminer;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ChestBlock;
+import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
@@ -10,7 +12,6 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
@@ -33,20 +34,25 @@ public class Modules {
     public boolean killAura = false;
     public boolean fullBright = false;
     public boolean antiAfk = false;
+    public boolean autoArmor = false;
+    public boolean scaffold = false;
+    public boolean velocity = false;
+    public boolean chestStealer = false;
 
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
 
     public BlockPos targetBlock = null;
+    public BlockPos targetChest = null;
+
     private int breakCooldown = 0;
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int stuckTicks = 0;
     private int afkTicks = 0;
-    private Vec3d lastPos = Vec3d.ZERO;
-
     private int detourTicks = 0;
     private boolean detourLeft = false;
+    private Vec3d lastPos = Vec3d.ZERO;
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
@@ -60,6 +66,12 @@ public class Modules {
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
 
+        // Velocity (Anti-Knockback)
+        if (velocity && player.hurtTime > 0) {
+            Vec3d vel = player.getVelocity();
+            player.setVelocity(vel.x * 0.2, vel.y, vel.z * 0.2);
+        }
+
         if (player.isOnGround() && player.input.movementForward > 0) player.setSprinting(true);
 
         if (antiAfk) {
@@ -70,22 +82,89 @@ public class Modules {
             }
         }
 
-        if (player.getHungerManager().getFoodLevel() < 15 && !player.getMainHandStack().isEmpty() && player.getMainHandStack().contains(DataComponentTypes.FOOD)) {
-            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
-            player.swingHand(Hand.MAIN_HAND);
-        }
-
-        if (client.world.getBlockState(player.getBlockPos().down()).getBlock() == Blocks.LAVA) {
-            client.options.jumpKey.setPressed(true);
-            client.options.forwardKey.setPressed(true);
-            return;
-        }
-
+        if (autoArmor) doAutoArmor(client, player);
+        if (chestStealer) doChestStealer(client, player);
+        if (scaffold) doScaffold(client, player);
         if (autoMine) doAutoMine(client, player);
         if (autoFish) doAutoFish(client, player);
         if (killAura) doKillAura(client, player);
     }
 
+    // ================== 1. AUTO ARMOR 2.0 ==================
+    private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.getItem() instanceof ArmorItem armor) {
+                int armorSlot = armor.getSlotType().getEntitySlotId() + 5;
+                ItemStack current = player.getInventory().getStack(armorSlot - 5);
+                // Если слот пуст или новая броня лучше
+                if (current.isEmpty() || (current.getItem() instanceof ArmorItem curArmor && armor.getProtection() > curArmor.getProtection())) {
+                    client.interactionManager.clickSlot(player.playerScreenHandler.syncId, i, 0, net.minecraft.screen.slot.SlotActionType.QUICK_MOVE, player);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ================== 2. CHEST STEALER ==================
+    private void doChestStealer(MinecraftClient client, ClientPlayerEntity player) {
+        if (client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.GenericContainerScreen) {
+            net.minecraft.screen.GenericContainerScreenHandler handler = ((net.minecraft.client.gui.screen.ingame.GenericContainerScreen) client.currentScreen).getScreenHandler();
+            for (int i = 0; i < handler.getInventory().size(); i++) {
+                if (!handler.getSlot(i).getStack().isEmpty()) {
+                    client.interactionManager.clickSlot(handler.syncId, i, 0, net.minecraft.screen.slot.SlotActionType.QUICK_MOVE, player);
+                    return;
+                }
+            }
+            player.closeHandledScreen();
+            return;
+        }
+
+        if (targetChest == null || client.world.getBlockState(targetChest).isAir() || !(client.world.getBlockState(targetChest).getBlock() instanceof ChestBlock)) {
+            targetChest = findNearestChest(client, player);
+        }
+
+        if (targetChest != null && player.getPos().distanceTo(Vec3d.ofCenter(targetChest)) < 4.0) {
+            BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(targetChest), Direction.UP, targetChest, false);
+            client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
+            targetChest = null;
+        }
+    }
+
+    private BlockPos findNearestChest(MinecraftClient client, ClientPlayerEntity player) {
+        BlockPos pPos = player.getBlockPos();
+        for (int x = -4; x <= 4; x++) {
+            for (int y = -2; y <= 2; y++) {
+                for (int z = -4; z <= 4; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    if (client.world.getBlockState(pos).getBlock() instanceof ChestBlock) return pos;
+                }
+            }
+        }
+        return null;
+    }
+
+    // ================== 3. SCAFFOLD ==================
+    private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
+        if (player.isOnGround() || player.isTouchingWater()) return;
+        if (player.getVelocity().y > 0.1) return; // Не ставим при прыжке вверх
+
+        BlockPos below = player.getBlockPos().down();
+        if (client.world.getBlockState(below).isAir()) {
+            for (int i = 0; i < 9; i++) {
+                ItemStack stack = player.getInventory().getStack(i);
+                if (stack.getItem() instanceof BlockItem) {
+                    if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
+                    BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below).add(0, 0.5, 0), Direction.UP, below, false);
+                    client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
+                    player.swingHand(Hand.MAIN_HAND);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ================== 4. AUTO MINE (Pathfinding 2.0) ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
@@ -99,7 +178,6 @@ public class Modules {
         if (detourTicks > 0) {
             player.setYaw(player.getYaw() + (detourLeft ? -15 : 15));
             client.options.forwardKey.setPressed(true);
-            client.options.jumpKey.setPressed(true);
             return;
         }
 
@@ -114,7 +192,7 @@ public class Modules {
             BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
             BlockPos hitBlock = hit.getBlockPos();
 
-            if (hitBlock.equals(player.getBlockPos()) || hitBlock.equals(player.getBlockPos().down()) || hitBlock.equals(player.getBlockPos().up())) {
+            if (hitBlock.equals(player.getBlockPos()) || hitBlock.equals(player.getBlockPos().down())) {
                 lookAt(player, targetBlock); 
                 return;
             }
@@ -134,7 +212,7 @@ public class Modules {
                         lookAt(player, hitBlock);
                         client.options.forwardKey.setPressed(true);
                     } else {
-                        startDetour(client); // ТУТ ИСПРАВЛЕНО
+                        startDetour(); 
                     }
                 }
                 return; 
@@ -145,15 +223,17 @@ public class Modules {
                 if (canWalkForward(client, player)) {
                     lookAt(player, targetBlock);
                     client.options.forwardKey.setPressed(true);
-                    
+                    if (targetBlock.getY() > player.getY() + 0.5 && player.horizontalCollision) client.options.jumpKey.setPressed(true);
+                    else client.options.jumpKey.setPressed(false);
+
                     double moved = player.getPos().squaredDistanceTo(lastPos);
                     if (moved < 0.001) {
                         stuckTicks++;
-                        if (stuckTicks > 10) { startDetour(client); stuckTicks = 0; } // ТУТ ИСПРАВЛЕНО
+                        if (stuckTicks > 10) { startDetour(); stuckTicks = 0; } 
                     } else stuckTicks = 0;
                     lastPos = player.getPos();
                 } else {
-                    startDetour(client); // ТУТ ИСПРАВЛЕНО
+                    startDetour(); 
                 }
             } else {
                 client.options.forwardKey.setPressed(false);
@@ -166,26 +246,19 @@ public class Modules {
                 }
             }
         } else {
-            if (canWalkForward(client, player)) {
-                client.options.forwardKey.setPressed(true);
-            } else {
-                startDetour(client); // ТУТ ИСПРАВЛЕНО
-            }
+            if (canWalkForward(client, player)) client.options.forwardKey.setPressed(true);
+            else startDetour(); 
         }
     }
 
     private boolean canWalkForward(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-        BlockPos frontDown = front.down();
-        BlockPos frontDown2 = frontDown.down();
-        return !client.world.getBlockState(frontDown).isAir() || !client.world.getBlockState(frontDown2).isAir();
+        return !client.world.getBlockState(front.down()).isAir();
     }
 
-    // ТУТ ИСПРАВЛЕНО: добавлен параметр MinecraftClient client
-    private void startDetour(MinecraftClient client) {
+    private void startDetour() {
         detourTicks = 20; 
         detourLeft = Math.random() > 0.5;
-        client.options.jumpKey.setPressed(true);
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
@@ -215,6 +288,50 @@ public class Modules {
         return nearest;
     }
 
+    // ================== 5. SMART KILLAURA ==================
+    private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
+        if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
+        if (attackCooldown > 0) return;
+
+        // Ищем цель с самым низким здоровьем
+        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
+            e -> e != player && e.isAlive())
+            .stream()
+            .min(Comparator.comparingDouble(LivingEntity::getHealth)) // Приоритет - низкое HP
+            .orElse(null);
+
+        if (target != null) {
+            Vec3d eye = player.getEyePos();
+            Vec3d targetPos = target.getEyePos();
+            BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+            
+            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
+                if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
+                    for (int i = 0; i < 9; i++) {
+                        if (player.getInventory().getStack(i).getItem() instanceof SwordItem) {
+                            player.getInventory().selectedSlot = i;
+                            break;
+                        }
+                    }
+                }
+                lookAtEntity(player, target);
+                // Silent Rotation: Бьем только если прицел уже почти на цели
+                if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
+                    client.interactionManager.attackEntity(player, target);
+                    player.swingHand(Hand.MAIN_HAND);
+                    attackCooldown = 4; 
+                }
+            }
+        }
+    }
+
+    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
+        double dx = entity.getX() - player.getX();
+        double dz = entity.getZ() - player.getZ();
+        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
+    }
+
+    // ================== 6. ОСТАЛЬНОЕ ==================
     public void renderESP(WorldRenderContext context) {
         if (targetBlock == null) return;
         MatrixStack matrices = context.matrixStack();
@@ -258,39 +375,6 @@ public class Modules {
         }
     }
 
-    private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
-        if (attackCooldown > 0) return;
-
-        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
-            e -> e != player && e.isAlive())
-            .stream()
-            .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
-            .orElse(null);
-
-        if (target != null) {
-            Vec3d eye = player.getEyePos();
-            Vec3d targetPos = target.getEyePos();
-            BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            
-            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
-                if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
-                    for (int i = 0; i < 9; i++) {
-                        if (player.getInventory().getStack(i).getItem() instanceof SwordItem) {
-                            player.getInventory().selectedSlot = i;
-                            break;
-                        }
-                    }
-                }
-                
-                lookAtEntity(player, target);
-                client.interactionManager.attackEntity(player, target);
-                player.swingHand(Hand.MAIN_HAND);
-                attackCooldown = 12; 
-            }
-        }
-    }
-
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
         Vec3d target = Vec3d.ofCenter(pos);
         Vec3d eye = player.getEyePos();
@@ -300,8 +384,8 @@ public class Modules {
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 15.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 20.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 20.0f));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
@@ -315,8 +399,7 @@ public class Modules {
         
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 20.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 20.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 15.0f));
     }
 }
