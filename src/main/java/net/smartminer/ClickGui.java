@@ -61,7 +61,7 @@ public class ClickGui extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         context.fill(centerX - 110, centerY - 110, centerX + 110, centerY + 90, 0xEE0F0F0F);
-        context.drawBorder(centerX - 110, centerY - 110, 220, 200, 0xFF9900FF); // Фиолетовая рамка
+        context.drawBorder(centerX - 110, centerY - 110, 220, 200, 0xFF9900FF); 
         context.drawCenteredTextWithShadow(this.textRenderer, "§l§dSMART CLIENT §7v5.0", centerX, centerY - 100, 0xFFFFFF);
         super.render(context, mouseX, mouseY, delta);
     }
