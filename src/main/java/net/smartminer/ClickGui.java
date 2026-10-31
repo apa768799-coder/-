@@ -16,14 +16,14 @@ public class ClickGui extends Screen {
     private final int COLOR_TOGGLE_ON = 0xFF00FF00;
     private final int COLOR_TOGGLE_OFF = 0xFF333333;
 
-    private int currentTab = 0; 
+    private int currentTab = 0; // 0=Combat, 1=Movement, 2=Render, 3=Player, 4=Logs, 5=XRay
 
     private int menuX, menuY;
     private boolean isDragging = false;
     private int dragOffsetX, dragOffsetY;
 
     private final int MENU_WIDTH = 460;
-    private final int MENU_HEIGHT = 300;
+    private final int MENU_HEIGHT = 330; // Чуть больше для новых кнопок
 
     public ClickGui() {
         super(Text.literal("Smart Client Menu"));
@@ -46,11 +46,8 @@ public class ClickGui extends Screen {
         int x2 = x1 + MENU_WIDTH;
         int y2 = y1 + MENU_HEIGHT;
 
-        // Красивая тень
         context.fill(x1 + 10, y1 + 10, x2 + 10, y2 + 10, 0x60000000);
-        // Градиентный фон
         context.fillGradient(x1, y1, x2, y2, COLOR_BG_TOP, COLOR_BG_BOTTOM);
-        // Неоновая рамка
         context.drawBorder(x1, y1, MENU_WIDTH, MENU_HEIGHT, COLOR_ACCENT);
 
         int catWidth = 130;
@@ -58,13 +55,14 @@ public class ClickGui extends Screen {
         context.fill(x1 + catWidth, y1, x1 + catWidth + 1, y2, 0xFF222222);
 
         context.drawCenteredTextWithShadow(this.textRenderer, "§lSMART", x1 + catWidth / 2, y1 + 20, COLOR_ACCENT);
-        context.drawCenteredTextWithShadow(this.textRenderer, "§lCLIENT §7v150", x1 + catWidth / 2, y1 + 32, COLOR_TEXT);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§lCLIENT §7v170", x1 + catWidth / 2, y1 + 32, COLOR_TEXT);
 
         drawCategory(context, "Combat", 0, y1 + 80, mouseX, mouseY, x1);
         drawCategory(context, "Movement", 1, y1 + 105, mouseX, mouseY, x1);
         drawCategory(context, "Render", 2, y1 + 130, mouseX, mouseY, x1);
         drawCategory(context, "Player", 3, y1 + 155, mouseX, mouseY, x1);
         drawCategory(context, "Logs", 4, y1 + 180, mouseX, mouseY, x1);
+        drawCategory(context, "X-Ray Ores", 5, y1 + 205, mouseX, mouseY, x1);
 
         int startX = x1 + catWidth + 20;
         int startY = y1 + 20;
@@ -115,7 +113,7 @@ public class ClickGui extends Screen {
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
 
             int logY = startY + 20;
-            int startLogIndex = Math.max(0, SmartClient.logs.size() - 18);
+            int startLogIndex = Math.max(0, SmartClient.logs.size() - 15);
             for (int i = startLogIndex; i < SmartClient.logs.size(); i++) {
                 String log = SmartClient.logs.get(i);
                 if (log.length() > 60) log = log.substring(0, 57) + "...";
@@ -130,6 +128,18 @@ public class ClickGui extends Screen {
                 logY += 12;
             }
         }
+        else if (currentTab == 5) { // X-RAY ORES
+            context.drawText(this.textRenderer, "§l§fВЫБОР РУД (X-Ray)", startX, startY, COLOR_TEXT, false);
+            context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF333333);
+
+            drawModule(context, "Diamond (Алмаз)", SmartClient.modules.xrayDiamond, startX, modStartY, x2Pos, mouseX, mouseY);
+            drawModule(context, "Iron (Железо)", SmartClient.modules.xrayIron, startX, modStartY + 25, x2Pos, mouseX, mouseY);
+            drawModule(context, "Gold (Золото)", SmartClient.modules.xrayGold, startX, modStartY + 50, x2Pos, mouseX, mouseY);
+            drawModule(context, "Emerald (Изумруд)", SmartClient.modules.xrayEmerald, startX, modStartY + 75, x2Pos, mouseX, mouseY);
+            drawModule(context, "Redstone (Редстоун)", SmartClient.modules.xrayRedstone, startX, modStartY + 100, x2Pos, mouseX, mouseY);
+            drawModule(context, "Lapis (Лазурит)", SmartClient.modules.xrayLapis, startX, modStartY + 125, x2Pos, mouseX, mouseY);
+            drawModule(context, "Coal (Уголь)", SmartClient.modules.xrayCoal, startX, modStartY + 150, x2Pos, mouseX, mouseY);
+        }
 
         context.drawCenteredTextWithShadow(this.textRenderer, "§8Right Shift - закрыть | ЛКМ на шапку - перетащить", x1 + (MENU_WIDTH/2), y2 - 15, 0x555555);
     }
@@ -140,7 +150,7 @@ public class ClickGui extends Screen {
 
         if (hover || active) {
             context.fill(x1, y - 5, x1 + 130, y + 15, COLOR_HOVER);
-            context.fillGradient(x1, y - 5, x1 + 3, y + 15, 0xFF00FFFF, 0xFF0055FF); // Градиентная полоска
+            context.fillGradient(x1, y - 5, x1 + 3, y + 15, 0xFF00FFFF, 0xFF0055FF);
         }
         context.drawText(this.textRenderer, (active ? "§b" : "§7") + name, x1 + 15, y, COLOR_TEXT, false);
     }
@@ -182,6 +192,7 @@ public class ClickGui extends Screen {
         if (isHovered(mouseX, mouseY, x1, y1 + 125, 130, 20)) currentTab = 2;
         if (isHovered(mouseX, mouseY, x1, y1 + 150, 130, 20)) currentTab = 3;
         if (isHovered(mouseX, mouseY, x1, y1 + 175, 130, 20)) currentTab = 4;
+        if (isHovered(mouseX, mouseY, x1, y1 + 200, 130, 20)) currentTab = 5;
 
         int startX = x1 + 130 + 20;
         int modStartY = y1 + 20 + 30;
@@ -213,6 +224,15 @@ public class ClickGui extends Screen {
             if (isHovered(mouseX, mouseY, toggleX, modStartY + 57, 30, 14)) SmartClient.modules.chestStealer = !SmartClient.modules.chestStealer;
             if (isHovered(mouseX, mouseY, toggleX, modStartY + 87, 30, 14)) SmartClient.modules.velocity = !SmartClient.modules.velocity;
             if (isHovered(mouseX, mouseY, toggleX, modStartY + 117, 30, 14)) SmartClient.modules.autoRespawn = !SmartClient.modules.autoRespawn;
+        }
+        else if (currentTab == 5) {
+            if (isHovered(mouseX, mouseY, toggleX, modStartY - 3, 30, 14)) SmartClient.modules.xrayDiamond = !SmartClient.modules.xrayDiamond;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 22, 30, 14)) SmartClient.modules.xrayIron = !SmartClient.modules.xrayIron;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 47, 30, 14)) SmartClient.modules.xrayGold = !SmartClient.modules.xrayGold;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 72, 30, 14)) SmartClient.modules.xrayEmerald = !SmartClient.modules.xrayEmerald;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 97, 30, 14)) SmartClient.modules.xrayRedstone = !SmartClient.modules.xrayRedstone;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 122, 30, 14)) SmartClient.modules.xrayLapis = !SmartClient.modules.xrayLapis;
+            if (isHovered(mouseX, mouseY, toggleX, modStartY + 147, 30, 14)) SmartClient.modules.xrayCoal = !SmartClient.modules.xrayCoal;
         }
 
         return super.mouseClicked(mouseX, mouseY, button);
