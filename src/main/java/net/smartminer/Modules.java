@@ -97,7 +97,6 @@ public class Modules {
 
     // ================== ИИ AUTOMINE С ПАТФАЙНДИНГОМ A* ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // 1. Проверяем кирку
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -107,7 +106,6 @@ public class Modules {
             }
         }
 
-        // 2. Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
@@ -121,19 +119,16 @@ public class Modules {
             return;
         }
 
-        // 3. Поиск руды
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             currentState = "Поиск руды";
             targetBlock = findNearestOre(client, player);
             currentPath.clear();
         }
 
-        // 4. Работа с рудой
         if (targetBlock != null) {
             double dist = player.getPos().distanceTo(Vec3d.ofCenter(targetBlock));
 
             if (dist <= 3.5) {
-                // Мы близко - копаем
                 currentState = "Добываю " + oreNames[targetOreIndex];
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
@@ -147,14 +142,13 @@ public class Modules {
                 return;
             }
 
-            // Идем по маршруту A*
             currentState = "Иду по маршруту";
             if (currentPath.isEmpty() || pathIndex >= currentPath.size()) {
                 currentPath = findPath(player.getBlockPos(), targetBlock);
                 pathIndex = 0;
                 if (currentPath.isEmpty()) {
                     currentState = "Путь заблокирован";
-                    targetBlock = null; // Не можем дойти
+                    targetBlock = null; 
                     return;
                 }
             }
@@ -166,14 +160,12 @@ public class Modules {
         }
     }
 
-    // ================== ДВИЖЕНИЕ ПО МАРШРУТУ ==================
     private void followPath(MinecraftClient client, ClientPlayerEntity player) {
         if (pathIndex >= currentPath.size()) return;
 
         BlockPos nextPos = currentPath.get(pathIndex);
         Vec3d targetVec = Vec3d.ofCenter(nextPos);
         
-        // Если мы дошли до узла
         if (player.getPos().distanceTo(targetVec) < 1.0) {
             pathIndex++;
             return;
@@ -182,14 +174,12 @@ public class Modules {
         lookAt(player, nextPos);
         client.options.forwardKey.setPressed(true);
 
-        // Прыгаем, если следующий блок выше нас
         if (nextPos.getY() > player.getBlockPos().getY()) {
             if (player.isOnGround()) client.options.jumpKey.setPressed(true);
         } else {
             client.options.jumpKey.setPressed(false);
         }
 
-        // Копаем, если блок на пути твердый
         if (!client.world.getBlockState(nextPos).isAir()) {
             currentState = "Копаю путь";
             if (breakCooldown <= 0) {
@@ -200,7 +190,6 @@ public class Modules {
         }
     }
 
-    // ================== АЛГОРИТМ A* (ПОИСК ПУТИ) ==================
     private List<BlockPos> findPath(BlockPos start, BlockPos end) {
         MinecraftClient client = MinecraftClient.getInstance();
         PriorityQueue<Node> openSet = new PriorityQueue<>(Comparator.comparingDouble(n -> n.fCost));
@@ -212,7 +201,7 @@ public class Modules {
         gScore.put(start, 0.0);
 
         int iterations = 0;
-        while (!openSet.isEmpty() && iterations < 1500) { // Лимит итераций для избежания лагов
+        while (!openSet.isEmpty() && iterations < 1500) {
             iterations++;
             Node current = openSet.poll();
 
@@ -225,7 +214,6 @@ public class Modules {
             for (Direction dir : Direction.values()) {
                 BlockPos neighbor = current.pos.offset(dir);
                 
-                // Ограничиваем область поиска 16 блоками
                 if (Math.abs(neighbor.getX() - start.getX()) > 16 || 
                     Math.abs(neighbor.getY() - start.getY()) > 16 || 
                     Math.abs(neighbor.getZ() - start.getZ()) > 16) continue;
@@ -233,7 +221,7 @@ public class Modules {
                 if (closedSet.contains(neighbor)) continue;
 
                 double moveCost = getMoveCost(client, neighbor);
-                if (moveCost >= 999) continue; // Лава или стена, которую нельзя сломать
+                if (moveCost >= 999) continue;
 
                 double tentativeG = gScore.get(current.pos) + moveCost;
                 if (tentativeG < gScore.getOrDefault(neighbor, Double.MAX_VALUE)) {
@@ -244,23 +232,23 @@ public class Modules {
                 }
             }
         }
-        return new ArrayList<>(); // Путь не найден
+        return new ArrayList<>(); 
     }
 
     private double getMoveCost(MinecraftClient client, BlockPos pos) {
         Block block = client.world.getBlockState(pos).getBlock();
-        Block below = client.world.getBlockState(pos.down()).getBlock();
+        Block blockBelow = client.world.getBlockState(pos.down()).getBlock();
         
         // В лаву не идем
-        if (block == Blocks.LAVA || below == Blocks.LAVA) return 999;
+        if (block == Blocks.LAVA || blockBelow == Blocks.LAVA) return 999;
         
         // Если это воздух и под ним воздух (падение) - дорого, но можно
-        if (block.isAir() && below.isAir()) return 10; 
+        if (block == Blocks.AIR && blockBelow == Blocks.AIR) return 10; 
         
         // Копать блок дороже, чем идти по воздуху
-        if (!block.isAir() && block != Blocks.WATER && block != Blocks.TALL_GRASS) return 5;
+        if (block != Blocks.AIR && block != Blocks.WATER && block != Blocks.SHORT_GRASS && block != Blocks.TALL_GRASS) return 5;
         
-        return 1; // Обычный воздух
+        return 1; 
     }
 
     private List<BlockPos> reconstructPath(Map<BlockPos, BlockPos> cameFrom, BlockPos current) {
