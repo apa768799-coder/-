@@ -15,11 +15,13 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
 public class Modules {
@@ -99,40 +101,58 @@ public class Modules {
         }
 
         if (targetBlock != null) {
-            double dist = player.getPos().distanceTo(Vec3d.ofCenter(targetBlock));
-            double yDiff = targetBlock.getY() - player.getY();
+            Vec3d eyePos = player.getEyePos();
+            Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
+
+            // --- УМНЫЙ RAYCAST (Проверка, видно ли руду) ---
+            BlockHitResult hit = client.world.raycast(new RaycastContext(
+                    eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player
+            ));
             
-            if (dist > 3.5) {
+            BlockPos hitBlock = hit.getBlockPos();
+
+            // Если луч уперся НЕ в руду, значит перед нами стена/камень
+            if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
+                double distToWall = player.getPos().distanceTo(Vec3d.ofCenter(hitBlock));
+                
+                if (distToWall <= 4.5) {
+                    // Стена близко - ломаем её, чтобы прокопать путь к руде
+                    client.options.forwardKey.setPressed(false);
+                    client.options.jumpKey.setPressed(false);
+                    lookAt(player, hitBlock);
+                    if (breakCooldown <= 0) {
+                        client.interactionManager.updateBlockBreakingProgress(hitBlock, Direction.UP);
+                        player.swingHand(Hand.MAIN_HAND);
+                        breakCooldown = 2;
+                    }
+                } else {
+                    // Стена далеко - идем к ней
+                    lookAt(player, hitBlock);
+                    client.options.forwardKey.setPressed(true);
+                }
+                return; // Выходим, так как сначала надо сломать стену
+            }
+
+            // --- ЕСЛИ ПУТЬ СВОБОДЕН ---
+            double distToOre = player.getPos().distanceTo(targetCenter);
+            
+            if (distToOre > 3.5) {
                 lookAt(player, targetBlock);
                 client.options.forwardKey.setPressed(true);
-                
-                // Умный прыжок (ТОЛЬКО если цель выше нас, а мы уперлись в стену)
-                if (yDiff > 1.0 && player.horizontalCollision && player.isOnGround()) {
-                    client.options.jumpKey.setPressed(true);
-                } 
-                // Если цель на той же высоте или ниже - не прыгаем
-                else {
-                    client.options.jumpKey.setPressed(false);
-                }
+                client.options.jumpKey.setPressed(false); // Не прыгаем на ровном месте
 
-                // Анти-Застревание (Если застряли и цель выше - копаем вверх/прыгаем)
+                // Анти-Застревание (если идем-идем, а не движемся)
                 double moved = player.getPos().squaredDistanceTo(lastPos);
                 if (moved < 0.001) {
                     stuckTicks++;
-                    if (stuckTicks > 10) {
-                        // Если застряли и не можем прыгнуть - ломаем блок перед собой
-                        BlockPos frontBlock = player.getBlockPos().offset(player.getHorizontalFacing()).up();
-                        if (!client.world.getBlockState(frontBlock).isAir() && breakCooldown <= 0) {
-                            client.interactionManager.updateBlockBreakingProgress(frontBlock, Direction.UP);
-                            player.swingHand(Hand.MAIN_HAND);
-                            breakCooldown = 2;
-                        }
+                    if (stuckTicks > 15) {
+                        client.options.jumpKey.setPressed(true); // Прыгаем, чтобы перепрыгнуть
                     }
                 } else stuckTicks = 0;
                 lastPos = player.getPos();
 
             } else {
-                // Мы у цели
+                // Руда в зоне досягаемости, путь свободен - копаем!
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
@@ -143,7 +163,7 @@ public class Modules {
                 }
             }
         } else {
-            // Руды нет - просто идем и не прыгаем
+            // Если руды не видно, просто идем вперед
             client.options.jumpKey.setPressed(false);
             client.options.forwardKey.setPressed(true);
         }
@@ -152,7 +172,7 @@ public class Modules {
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 30.0;
+        double bestDist = 40.0; // Увеличили радиус поиска до 40 блоков
 
         Block t1 = switch (targetOreIndex) {
             case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
@@ -161,9 +181,9 @@ public class Modules {
             case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE; case 1 -> Blocks.DEEPSLATE_IRON_ORE; case 2 -> Blocks.DEEPSLATE_GOLD_ORE; case 3 -> Blocks.DEEPSLATE_COAL_ORE; default -> Blocks.DEEPSLATE_EMERALD_ORE;
         };
 
-        for (int x = -15; x <= 15; x++) {
-            for (int y = -15; y <= 15; y++) {
-                for (int z = -15; z <= 15; z++) {
+        for (int x = -20; x <= 20; x++) {
+            for (int y = -20; y <= 20; y++) {
+                for (int z = -20; z <= 20; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     Block b = client.world.getBlockState(pos).getBlock();
                     if (b == t1 || b == t2) {
