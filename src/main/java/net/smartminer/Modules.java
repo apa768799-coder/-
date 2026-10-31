@@ -69,6 +69,9 @@ public class Modules {
     private Random random = new Random();
     private String lastLoggedState = "";
 
+    // ЧЕЛОВЕЧЕСКИЕ ПАУЗЫ
+    private int actionDelay = 0;
+
     private void updateState(String newState) {
         this.currentState = newState;
         if (!newState.equals(lastLoggedState)) {
@@ -85,7 +88,8 @@ public class Modules {
         
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player != null) {
-            player.setYaw(player.getYaw() + 180.0f); 
+            // Вместо резкого разворота, начинаем медленно поворачиваться (это сделает lookAt)
+            this.targetBlock = player.getBlockPos().offset(player.getHorizontalFacing().getOpposite(), 10);
         }
     }
 
@@ -95,6 +99,7 @@ public class Modules {
 
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
+        if (actionDelay > 0) { actionDelay--; return; } // Пауза "человека"
 
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
@@ -146,16 +151,16 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
+        // Логика отступления (теперь плавная)
         if (escapeTicks > 0) {
             escapeTicks--;
             updateState("Отступаю от привата...");
             client.options.forwardKey.setPressed(true); 
             client.options.backKey.setPressed(false);
-            client.options.jumpKey.setPressed(false);
+            client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
             return;
         }
 
-        // Проверка на полный инвентарь
         int emptySlots = 0;
         for (int i = 0; i < 36; i++) {
             if (player.getInventory().getStack(i).isEmpty()) emptySlots++;
@@ -175,9 +180,7 @@ public class Modules {
             }
         }
 
-        // ==========================================
-        // 1. СНАЧАЛА СОБИРАЕМ ЛУТ (Приоритет)
-        // ==========================================
+        // 1. СБОР ЛУТА (Приоритет)
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
@@ -188,23 +191,15 @@ public class Modules {
             if (dist > 1.2) {
                 lookAtEntity(player, targetItem);
                 client.options.forwardKey.setPressed(true);
-                client.options.jumpKey.setPressed(false);
-                
-                // Если застряли на пути к луту, прыгаем
-                if (player.horizontalCollision && player.isOnGround()) {
-                    client.options.jumpKey.setPressed(true);
-                }
+                client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
             } else {
-                // Подошли близко, игра сама подберет предмет
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
             }
-            return; // ВАЖНО: Пока не соберем лут, руду не ищем!
+            return; 
         }
 
-        // ==========================================
-        // 2. ПОТОМ ИЩЕМ И КОПАЕМ РУДУ
-        // ==========================================
+        // 2. ПОИСК РУДЫ
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
@@ -228,12 +223,13 @@ public class Modules {
             if (dist <= 4.5) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false);
+                client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
                 lookAt(player, targetBlock);
                 
                 if (client.world.getBlockState(targetBlock).isAir()) {
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     targetBlock = null;
+                    actionDelay = 3 + random.nextInt(5); // Задержка, как будто смотрим на лут
                 } else {
                     breakBlock(client, player, targetBlock);
                 }
@@ -242,24 +238,31 @@ public class Modules {
 
             int dy = targetBlock.getY() - player.getBlockPos().getY();
             
+            // КОПАЕМ ЛЕСТНИЦУ (ВВЕРХ)
             if (dy >= 2) {
                 updateState("Копаю лестницу ВВЕРХ");
                 BlockPos upFront = player.getBlockPos().offset(player.getHorizontalFacing()).up();
                 lookAt(player, upFront);
                 breakBlock(client, player, upFront);
-                if (player.isOnGround()) client.options.jumpKey.setPressed(true);
+                // Прыжок ТОЛЬКО если блок спереди сломан и нам надо залезть
+                if (client.world.getBlockState(upFront).isAir() && player.horizontalCollision) {
+                    client.options.jumpKey.setPressed(true);
+                }
                 return;
             }
             
+            // КОПАЕМ ЛЕСТНИЦУ (ВНИЗ)
             if (dy <= -2) {
                 updateState("Копаю лестницу ВНИЗ");
                 BlockPos downFront = player.getBlockPos().offset(player.getHorizontalFacing()).down();
                 lookAt(player, downFront);
                 breakBlock(client, player, downFront);
+                // Прыжок не нужен, просто идем вперед
                 if (client.world.getBlockState(downFront).isAir()) client.options.forwardKey.setPressed(true);
                 return;
             }
 
+            // ИДЕМ К РУДЕ
             updateState("Иду к руде");
             lookAt(player, targetBlock);
 
@@ -282,7 +285,19 @@ public class Modules {
                 return;
             }
 
+            // Движение вперед (БЕЗ ПРЫЖКОВ)
             client.options.forwardKey.setPressed(true);
+            
+            // ПРЫГАЕМ ТОЛЬКО ЕСЛИ УПЕРЛИСЬ В БЛОК ВЫСОТОЙ 1 БЛОК
+            if (player.horizontalCollision && player.isOnGround()) {
+                if (!client.world.getBlockState(front).isAir() && client.world.getBlockState(front.up()).isAir()) {
+                    client.options.jumpKey.setPressed(true);
+                } else {
+                    client.options.jumpKey.setPressed(false); // Это стена, копаем
+                }
+            } else {
+                client.options.jumpKey.setPressed(false);
+            }
             return;
         }
 
@@ -327,7 +342,11 @@ public class Modules {
         }
 
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-        if (player.age % 4 == 0) player.swingHand(Hand.MAIN_HAND);
+        
+        // Рандомная анимация рукой (человек машет не идеально ровно)
+        if (player.age % (3 + random.nextInt(3)) == 0) {
+            player.swingHand(Hand.MAIN_HAND);
+        }
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
@@ -359,7 +378,6 @@ public class Modules {
         return nearest;
     }
 
-    // ИСПРАВЛЕНО: Радиус поиска лута увеличен до 5 блоков
     private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
         return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(5.0), 
             e -> e.isAlive() && !e.getStack().isEmpty())
@@ -523,6 +541,7 @@ public class Modules {
         }
     }
 
+    // ЧЕЛОВЕЧЕСКИЙ ПОВОРОТ КАМЕРЫ (Очень плавный, 3-4 градуса за тик)
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
         Vec3d target = Vec3d.ofCenter(pos);
         Vec3d eye = player.getEyePos();
@@ -530,11 +549,15 @@ public class Modules {
         double dist = Math.sqrt(dx * dx + dz * dz);
         float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
+        
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 10.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 10.0f));
+        // Ограничиваем скорость поворота (макс 4 градуса за тик + немного рандома)
+        float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
+        
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
@@ -549,7 +572,9 @@ public class Modules {
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 10.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 10.0f));
+        float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
+        
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 }
