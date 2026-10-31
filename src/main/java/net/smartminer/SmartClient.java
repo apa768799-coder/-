@@ -17,15 +17,12 @@ public class SmartClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Бинд на открытие меню (Right Shift)
         guiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.smartclient.gui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.smartclient"
         ));
-        // Бинд на Авто-Майн (Клавиша R)
         mineKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.smartclient.mine", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_R, "category.smartclient"
         ));
-        // Бинд на Авто-Рыбалку (Клавиша F)
         fishKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.smartclient.fish", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F, "category.smartclient"
         ));
@@ -48,9 +45,9 @@ public class SmartClient implements ClientModInitializer {
             }
         });
 
-        // Визуалы (ESP) - рисуем рамки вокруг руды
+        // Визуалы (рисуем рамку вокруг руды)
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
-            if (modules.autoMine && client().world != null) {
+            if (client().world != null && modules.autoMine) {
                 modules.renderESP(context);
             }
         });
