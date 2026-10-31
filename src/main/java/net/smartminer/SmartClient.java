@@ -64,7 +64,12 @@ public class SmartClient implements ClientModInitializer {
             
             active.sort(Comparator.comparingInt(String::length).reversed());
 
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v25", 8, 8, 0xFFFFFF);
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v30", 8, 8, 0xFFFFFF);
+
+            // Показываем "мозги" бота (что он делает прямо сейчас)
+            if (modules.autoMine) {
+                context.drawTextWithShadow(client.textRenderer, "§7AI State: §e" + modules.currentState, 8, 20, 0xFFFFFF);
+            }
 
             for (String mod : active) {
                 int width = client.textRenderer.getWidth(mod);
