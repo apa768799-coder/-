@@ -59,22 +59,20 @@ public class SmartClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v40", 8, 8, 0xFFFFFF);
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v50", 8, 8, 0xFFFFFF);
             if (modules.autoMine) {
                 context.drawTextWithShadow(client.textRenderer, "§7AI: §e" + modules.currentState, 8, 20, 0xFFFFFF);
             }
         });
 
-        // АНТИ-ПРИВАТ ЧЕРЕЗ ЧАТ
+        // ================== ЧТЕНИЕ ЧАТА (АНТИ-ПРИВАТ) ==================
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             String text = message.getString();
+            
             if (text.contains("Вы не можете ломать блоки") || text.contains("Вы не можете взаимодействовать")) {
                 if (modules.autoMine) {
-                    modules.autoMine = false;
-                    addLog("§c⚠ ПРИВАТ! AutoMine выключен.");
-                    if (MinecraftClient.getInstance().player != null) {
-                        MinecraftClient.getInstance().player.sendMessage(net.minecraft.text.Text.literal("§c[Smart] Обнаружен приват! Авто-шахта выключена."), false);
-                    }
+                    modules.triggerRetreat(); // Вызываем разворот и отступление
+                    addLog("§c⚠ ОБНАРУЖЕН ПРИВАТ! Разворачиваюсь.");
                 }
             }
         });
