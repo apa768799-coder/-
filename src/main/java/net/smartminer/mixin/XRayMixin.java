@@ -1,8 +1,8 @@
 package net.smartminer.mixin;
 
 import net.minecraft.block.AbstractBlock;
+import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.BlockState;
-import net.minecraft.client.render.BlockRenderType;
 import net.smartminer.SmartClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
