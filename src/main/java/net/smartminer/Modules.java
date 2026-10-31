@@ -4,7 +4,6 @@ import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
-import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
@@ -15,6 +14,7 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -29,6 +29,7 @@ import org.joml.Matrix4f;
 import java.util.Comparator;
 
 public class Modules {
+    // ВОТ ЭТИ ПЕРЕМЕННЫЕ ОТСУТСТВОВАЛИ
     public boolean autoMine = false;
     public boolean autoFish = false;
     public boolean killAura = false;
@@ -66,7 +67,6 @@ public class Modules {
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
 
-        // Velocity (Anti-Knockback)
         if (velocity && player.hurtTime > 0) {
             Vec3d vel = player.getVelocity();
             player.setVelocity(vel.x * 0.2, vel.y, vel.z * 0.2);
@@ -90,29 +90,26 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
-    // ================== 1. AUTO ARMOR 2.0 ==================
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
             if (stack.getItem() instanceof ArmorItem armor) {
                 int armorSlot = armor.getSlotType().getEntitySlotId() + 5;
                 ItemStack current = player.getInventory().getStack(armorSlot - 5);
-                // Если слот пуст или новая броня лучше
                 if (current.isEmpty() || (current.getItem() instanceof ArmorItem curArmor && armor.getProtection() > curArmor.getProtection())) {
-                    client.interactionManager.clickSlot(player.playerScreenHandler.syncId, i, 0, net.minecraft.screen.slot.SlotActionType.QUICK_MOVE, player);
+                    client.interactionManager.clickSlot(player.playerScreenHandler.syncId, i, 0, SlotActionType.QUICK_MOVE, player);
                     return;
                 }
             }
         }
     }
 
-    // ================== 2. CHEST STEALER ==================
     private void doChestStealer(MinecraftClient client, ClientPlayerEntity player) {
         if (client.currentScreen instanceof net.minecraft.client.gui.screen.ingame.GenericContainerScreen) {
             net.minecraft.screen.GenericContainerScreenHandler handler = ((net.minecraft.client.gui.screen.ingame.GenericContainerScreen) client.currentScreen).getScreenHandler();
             for (int i = 0; i < handler.getInventory().size(); i++) {
                 if (!handler.getSlot(i).getStack().isEmpty()) {
-                    client.interactionManager.clickSlot(handler.syncId, i, 0, net.minecraft.screen.slot.SlotActionType.QUICK_MOVE, player);
+                    client.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, player);
                     return;
                 }
             }
@@ -144,10 +141,9 @@ public class Modules {
         return null;
     }
 
-    // ================== 3. SCAFFOLD ==================
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
         if (player.isOnGround() || player.isTouchingWater()) return;
-        if (player.getVelocity().y > 0.1) return; // Не ставим при прыжке вверх
+        if (player.getVelocity().y > 0.1) return;
 
         BlockPos below = player.getBlockPos().down();
         if (client.world.getBlockState(below).isAir()) {
@@ -164,7 +160,6 @@ public class Modules {
         }
     }
 
-    // ================== 4. AUTO MINE (Pathfinding 2.0) ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
@@ -288,16 +283,14 @@ public class Modules {
         return nearest;
     }
 
-    // ================== 5. SMART KILLAURA ==================
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
         if (attackCooldown > 0) return;
 
-        // Ищем цель с самым низким здоровьем
         LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
             e -> e != player && e.isAlive())
             .stream()
-            .min(Comparator.comparingDouble(LivingEntity::getHealth)) // Приоритет - низкое HP
+            .min(Comparator.comparingDouble(LivingEntity::getHealth))
             .orElse(null);
 
         if (target != null) {
@@ -315,7 +308,6 @@ public class Modules {
                     }
                 }
                 lookAtEntity(player, target);
-                // Silent Rotation: Бьем только если прицел уже почти на цели
                 if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
                     client.interactionManager.attackEntity(player, target);
                     player.swingHand(Hand.MAIN_HAND);
@@ -331,7 +323,6 @@ public class Modules {
         return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
     }
 
-    // ================== 6. ОСТАЛЬНОЕ ==================
     public void renderESP(WorldRenderContext context) {
         if (targetBlock == null) return;
         MatrixStack matrices = context.matrixStack();
@@ -399,6 +390,7 @@ public class Modules {
         
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
+        
         player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); 
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 15.0f));
     }
