@@ -10,7 +10,6 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
-import java.awt.*;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -45,38 +44,27 @@ public class SmartClient implements ClientModInitializer {
             }
         });
 
-        // Красивый HUD (ArrayList)
         HudRenderCallback.EVENT.register((context, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
             int screenWidth = client.getWindow().getScaledWidth();
             int y = 5;
+            List<String> active = new ArrayList<>();
+            if (modules.autoMine) active.add("AutoMine §7[" + modules.oreNames[modules.targetOreIndex] + "]");
+            if (modules.autoFish) active.add("AutoFish");
+            if (modules.killAura) active.add("KillAura");
+            if (modules.fullBright) active.add("FullBright");
+            if (modules.antiAfk) active.add("Anti-AFK");
             
-            // Собираем активные модули
-            List<String> activeModules = new ArrayList<>();
-            if (modules.autoMine) activeModules.add("AutoMine §7[" + modules.oreNames[modules.targetOreIndex] + "]");
-            if (modules.autoFish) activeModules.add("AutoFish");
-            if (modules.killAura) activeModules.add("KillAura");
-            if (modules.fullBright) activeModules.add("FullBright");
-            if (modules.antiAfk) activeModules.add("Anti-AFK");
-            
-            // Сортируем по длине текста (чтобы было красиво)
-            activeModules.sort(Comparator.comparingInt(String::length).reversed());
+            active.sort(Comparator.comparingInt(String::length).reversed());
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v13", 5, 5, 0xFFFFFF);
 
-            // Рисуем водяной знак
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v12", 5, 5, 0xFFFFFF);
-
-            // Рисуем ArrayList справа
-            for (String mod : activeModules) {
+            for (String mod : active) {
                 int width = client.textRenderer.getWidth(mod);
                 int x = screenWidth - width - 5;
-                
-                // Задний фон (полупрозрачный черный)
                 context.fill(x - 2, y, screenWidth - 2, y + 10, 0x60000000);
-                // Неоновая полоска слева
                 context.fill(x - 2, y, x - 1, y + 10, 0xFF00FFFF); 
-                
                 context.drawTextWithShadow(client.textRenderer, mod, x, y + 1, 0xFFFFFF);
                 y += 11;
             }
