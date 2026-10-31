@@ -91,6 +91,12 @@ public class SmartClient implements ClientModInitializer {
             long uptime = (System.currentTimeMillis() - startTime) / 1000;
             String timeStr = String.format("%02d:%02d", uptime / 60, uptime % 60);
             
+            // ИСПРАВЛЕНО: Переменные вынесены наверх
+            int screenWidth = client.getWindow().getScaledWidth();
+            int screenHeight = client.getWindow().getScaledHeight();
+            int centerX = screenWidth / 2;
+            int centerY = screenHeight / 2;
+
             // Водяной знак
             String watermark = "§l§bPULSE §fVISUALS §7| §b" + fps + " FPS §7| §e" + timeStr;
             context.drawTextWithShadow(client.textRenderer, watermark, 5, 5, 0xFFFFFF);
@@ -99,7 +105,7 @@ public class SmartClient implements ClientModInitializer {
             if (modules.lowHp && client.player.getHealth() < 6.0f) {
                 float pulse = (float) (Math.sin(System.currentTimeMillis() / 200.0) * 0.5 + 0.5);
                 int alpha = (int) (pulse * 100);
-                context.fill(0, 0, client.getWindow().getScaledWidth(), client.getWindow().getScaledHeight(), (alpha << 24) | 0xFF0000);
+                context.fill(0, 0, screenWidth, screenHeight, (alpha << 24) | 0xFF0000);
             }
 
             // Собираем включенные модули
@@ -119,10 +125,12 @@ public class SmartClient implements ClientModInitializer {
             if (modules.criticals) activeModules.add("Criticals");
             if (modules.trajectory) activeModules.add("Trajectory");
             if (modules.damageNumbers) activeModules.add("DamageNumbers");
+            if (modules.hitParticles) activeModules.add("HitParticles");
+            if (modules.hitCounter) activeModules.add("HitCounter");
+            if (modules.lowHp) activeModules.add("LowHP");
 
             activeModules.sort(Comparator.comparingInt(String::length).reversed());
 
-            int screenWidth = client.getWindow().getScaledWidth();
             int y = 20;
             long currentTime = System.currentTimeMillis();
 
@@ -147,27 +155,26 @@ public class SmartClient implements ClientModInitializer {
             // Красивый TargetHUD (Pulse Style)
             if (modules.killAuraTarget != null && modules.killAuraTarget.isAlive()) {
                 LivingEntity target = modules.killAuraTarget;
-                int cx = client.getWindow().getScaledWidth() / 2;
-                int cy = client.getWindow().getScaledHeight() / 2 + 40;
+                int hudY = centerY + 40;
                 String name = target.getName().getString();
                 float healthPercent = Math.max(0, target.getHealth() / target.getMaxHealth());
                 float armor = target.getArmor();
                 double distance = client.player.distanceTo(target);
 
                 // Рамка
-                context.fill(cx - 75, cy, cx + 75, cy + 45, 0xAA000000);
-                context.drawBorder(cx - 75, cy, 150, 45, 0xFF00FFFF);
+                context.fill(centerX - 75, hudY, centerX + 75, hudY + 45, 0xAA000000);
+                context.drawBorder(centerX - 75, hudY, 150, 45, 0xFF00FFFF);
 
                 // Имя и Дистанция
-                context.drawTextWithShadow(client.textRenderer, name, cx - 70, cy + 4, 0xFFFFFFFF);
-                context.drawTextWithShadow(client.textRenderer, String.format("%.1f", distance) + "m", cx + 40, cy + 4, 0xFFAAAAAA);
+                context.drawTextWithShadow(client.textRenderer, name, centerX - 70, hudY + 4, 0xFFFFFFFF);
+                context.drawTextWithShadow(client.textRenderer, String.format("%.1f", distance) + "m", centerX + 40, hudY + 4, 0xFFAAAAAA);
 
                 // Полоска здоровья
-                context.fill(cx - 70, cy + 18, cx + 70, cy + 24, 0xFF222222);
-                context.fillGradient(cx - 70, cy + 18, (int)(cx - 70 + (140 * healthPercent)), cy + 24, 0xFF00FF00, 0xFF00AA00);
+                context.fill(centerX - 70, hudY + 18, centerX + 70, hudY + 24, 0xFF222222);
+                context.fillGradient(centerX - 70, hudY + 18, (int)(centerX - 70 + (140 * healthPercent)), hudY + 24, 0xFF00FF00, 0xFF00AA00);
                 
                 // Броня
-                context.drawTextWithShadow(client.textRenderer, "🛡 " + (int)armor, cx - 70, cy + 30, 0xFFAAAAAA);
+                context.drawTextWithShadow(client.textRenderer, "🛡 " + (int)armor, centerX - 70, hudY + 30, 0xFFAAAAAA);
             }
 
             // Damage Numbers (Числа урона)
@@ -176,12 +183,12 @@ public class SmartClient implements ClientModInitializer {
                     float alpha = 1.0f - (float)(currentTime - dn.spawnTime) / 1000.0f;
                     if (alpha <= 0) continue;
                     int a = (int)(alpha * 255) << 24;
-                    int color = dn.isCrit ? (a | 0xFF0000) : (a | 0xFFAA00); // Красный для крита, золотой для обычного
+                    int color = dn.isCrit ? (a | 0xFF0000) : (a | 0xFFAA00); 
                     
                     // Проецирование 3D координат в 2D (упрощенно)
                     Vec3d pos = dn.pos;
-                    int x = (int)(cx + (pos.x - client.player.getX()) * 50);
-                    int yDmg = (int)(cy + (pos.y - client.player.getY()) * 50);
+                    int x = (int)(centerX + (pos.x - client.player.getX()) * 50);
+                    int yDmg = (int)(centerY + (pos.y - client.player.getY()) * 50);
                     
                     context.drawCenteredTextWithShadow(client.textRenderer, String.valueOf((int)dn.damage), x, yDmg, color);
                 }
@@ -189,7 +196,7 @@ public class SmartClient implements ClientModInitializer {
 
             // Hit Counter (Счетчик серии)
             if (modules.hitCounter && modules.currentHitCount > 0) {
-                context.drawCenteredTextWithShadow(client.textRenderer, "§l§cHIT: " + modules.currentHitCount, cx, cy - 80, 0xFFFFFFFF);
+                context.drawCenteredTextWithShadow(client.textRenderer, "§l§cHIT: " + modules.currentHitCount, centerX, centerY - 80, 0xFFFFFFFF);
             }
         });
 
