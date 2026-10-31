@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "net.smartminer.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "XRayMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
