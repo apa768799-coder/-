@@ -15,7 +15,7 @@ public class ClickGui extends Screen {
     public static Modules modules;
     public static final int ACCENT_COLOR = new Color(0, 255, 180).getRGB();
     public static final int BG_COLOR = new Color(15, 15, 20, 220).getRGB();
-    public static final int PANEL_COLOR = new Color(25, 25, 30, 240).getRGB();
+    public static final int PANEL_COLOR = new Color(25, 25, 30, 255).getRGB();
     public static final int HEADER_COLOR = new Color(35, 35, 45, 255).getRGB();
     public static final int TEXT_COLOR = new Color(220, 220, 220).getRGB();
     public static final int TEXT_DARK = new Color(150, 150, 150).getRGB();
@@ -38,20 +38,26 @@ public class ClickGui extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.fill(0, 0, this.width, this.height, new Color(0, 0, 0, 100).getRGB());
+        // 1. Сначала рисуем стандартный фон (размытие)
+        super.render(context, mouseX, mouseY, delta);
 
+        // 2. Затемняем экран
+        context.fill(0, 0, this.width, this.height, new Color(0, 0, 0, 120).getRGB());
+
+        // 3. Рисуем наши панели
         for (Panel panel : panels) {
             panel.render(context, mouseX, mouseY, delta);
         }
 
+        // 4. Рисуем Watermark (Логотип)
         String watermark = "SmartMiner v4.0";
         int wmWidth = this.textRenderer.getWidth(watermark);
         context.fill(10, 10, 10 + wmWidth + 10, 25, BG_COLOR);
         context.drawBorder(10, 10, wmWidth + 10, 15, ACCENT_COLOR);
         context.drawTextWithShadow(this.textRenderer, watermark, 15, 14, ACCENT_COLOR);
 
+        // 5. Рисуем ArrayList (Список включенных модулей)
         renderArrayList(context);
-        super.render(context, mouseX, mouseY, delta);
     }
 
     private void renderArrayList(DrawContext context) {
@@ -72,9 +78,10 @@ public class ClickGui extends Screen {
         for (String s : active) {
             int width = textRenderer.getWidth(s) + 8;
             int x = this.width - width - 5;
+            
             context.fill(x, y, this.width - 5, y + 12, new Color(20, 20, 25, 200).getRGB());
             context.fill(x, y, x + 2, y + 12, ACCENT_COLOR);
-            context.drawTextWithShadow(textRenderer, s, x + 5, y + 2, -1);
+            context.drawTextWithShadow(textRenderer, s, x + 5, y + 2, -1); // -1 = белый цвет
             y += 14;
         }
     }
@@ -113,7 +120,6 @@ public class ClickGui extends Screen {
             return true;
         }
         
-        // Обновление слайдеров при перетаскивании
         for (Panel panel : panels) {
             for (ModuleButton btn : panel.buttons) {
                 if (btn.expanded && btn.animation > 0.9f) {
@@ -151,9 +157,6 @@ public class ClickGui extends Screen {
         return false;
     }
 
-    // ==========================================
-    // КЛАСС ПАНЕЛИ
-    // ==========================================
     public class Panel {
         public String title;
         public int x, y;
@@ -215,8 +218,7 @@ public class ClickGui extends Screen {
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             int totalHeight = headerHeight;
             for (ModuleButton b : buttons) totalHeight += b.getHeight();
-            int maxScroll = Math.max(0, totalHeight - maxHeight);
-
+            
             context.fill(x, y, x + width, y + maxHeight, PANEL_COLOR);
             context.drawBorder(x, y, width, maxHeight, new Color(50, 50, 60).getRGB());
             
@@ -278,9 +280,6 @@ public class ClickGui extends Screen {
         }
     }
 
-    // ==========================================
-    // КЛАСС КНОПКИ МОДУЛЯ
-    // ==========================================
     public class ModuleButton {
         public String name;
         public Panel parent;
@@ -317,7 +316,8 @@ public class ClickGui extends Screen {
             context.fill(px, py, px + width, py + 16, color);
             context.drawBorder(px, py, width, 16, new Color(50, 50, 60).getRGB());
 
-            int textColor = enabled ? 0 : TEXT_COLOR;
+            // ИСПРАВЛЕНО: Теперь текст черный (0xFF000000), если включен, иначе светлый
+            int textColor = enabled ? 0xFF000000 : TEXT_COLOR;
             context.drawTextWithShadow(textRenderer, name, px + 4, py + 4, textColor);
 
             if (!settings.isEmpty()) {
@@ -360,9 +360,6 @@ public class ClickGui extends Screen {
         }
     }
 
-    // ==========================================
-    // КЛАСС НАСТРОЙКИ (СЛАЙДЕР / ЧЕКБОКС)
-    // ==========================================
     public enum SettingType { SLIDER, CHECKBOX }
 
     public class SettingComponent {
