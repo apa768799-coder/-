@@ -46,7 +46,7 @@ public class ClickGui extends Screen {
 
         context.drawText(this.textRenderer, "§l§bSMART", x1 + 15, y1 + 20, COLOR_TEXT, false);
         context.drawText(this.textRenderer, "§l§fCLIENT", x1 + 15, y1 + 32, COLOR_TEXT, false);
-        context.drawText(this.textRenderer, "§8v12.0", x1 + 15, y1 + 44, COLOR_TEXT_DIM, false);
+        context.drawText(this.textRenderer, "§8v13.0", x1 + 15, y1 + 44, COLOR_TEXT_DIM, false);
 
         drawCategory(context, "Combat", 0, y1 + 80, mouseX, mouseY, x1);
         drawCategory(context, "Movement", 1, y1 + 105, mouseX, mouseY, x1);
@@ -58,11 +58,11 @@ public class ClickGui extends Screen {
         int modStartY = startY + 30;
         int x2Pos = cx + 190;
 
-        if (currentTab == 0) { // COMBAT
+        if (currentTab == 0) {
             context.drawText(this.textRenderer, "§l§fБОЙ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "KillAura", SmartClient.modules.killAura, startX, modStartY, x2Pos, mouseX, mouseY);
-        } else if (currentTab == 1) { // MOVEMENT
+        } else if (currentTab == 1) {
             context.drawText(this.textRenderer, "§l§fФАРМ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             
@@ -77,11 +77,11 @@ public class ClickGui extends Screen {
             context.drawText(this.textRenderer, hoverRight ? "§a>" : "§7>", x2 - 40, modStartY + 30, COLOR_TEXT, false);
 
             drawModule(context, "AutoFish", SmartClient.modules.autoFish, startX, modStartY + 60, x2Pos, mouseX, mouseY);
-        } else if (currentTab == 2) { // RENDER
+        } else if (currentTab == 2) {
             context.drawText(this.textRenderer, "§l§fВИЗУАЛЫ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "FullBright", SmartClient.modules.fullBright, startX, modStartY, x2Pos, mouseX, mouseY);
-        } else if (currentTab == 3) { // PLAYER
+        } else if (currentTab == 3) {
             context.drawText(this.textRenderer, "§l§fИГРОК", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "Anti-AFK", SmartClient.modules.antiAfk, startX, modStartY, x2Pos, mouseX, mouseY);
