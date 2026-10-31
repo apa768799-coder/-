@@ -57,6 +57,15 @@ public class Modules {
     public boolean playerESP = false;
     public boolean xray = false;
 
+    // ВЫБОР РУД ДЛЯ X-RAY
+    public boolean xrayDiamond = true;
+    public boolean xrayIron = true;
+    public boolean xrayGold = true;
+    public boolean xrayEmerald = true;
+    public boolean xrayCoal = false;
+    public boolean xrayRedstone = false;
+    public boolean xrayLapis = false;
+
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
 
@@ -167,34 +176,54 @@ public class Modules {
         }
     }
 
+    // ================== УМНЫЙ X-RAY С ВЫБОРОМ РУД ==================
+    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
+        xrayBlocks.clear();
+        BlockPos pPos = player.getBlockPos();
+        int radius = 25; 
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    Block b = client.world.getBlockState(pos).getBlock();
+                    
+                    boolean isTarget = false;
+                    
+                    if (xrayDiamond && (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE)) isTarget = true;
+                    if (xrayIron && (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE)) isTarget = true;
+                    if (xrayGold && (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE)) isTarget = true;
+                    if (xrayEmerald && (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE)) isTarget = true;
+                    if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) isTarget = true;
+                    if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) isTarget = true;
+                    if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) isTarget = true;
+
+                    if (isTarget) xrayBlocks.add(pos);
+                }
+            }
+        }
+    }
+
     // ================== ЛЕГИТНЫЙ SCAFFOLD ==================
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
-        // Не ставим блоки, если мы на земле или в воде
         if (player.isOnGround() || player.isTouchingWater() || player.isInLava()) return;
 
         BlockPos below = player.getBlockPos().down();
         
-        // Если под нами воздух или лава - ставим блок
         if (client.world.getBlockState(below).isAir() || client.world.getBlockState(below).getBlock() == Blocks.LAVA) {
             for (int i = 0; i < 9; i++) {
                 ItemStack stack = player.getInventory().getStack(i);
                 if (stack.getItem() instanceof BlockItem) {
                     if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
                     
-                    // Ищем блок, к которому можно прикрепить наш блок (сзади нас)
                     BlockPos neighbor = below.offset(player.getHorizontalFacing().getOpposite());
                     
-                    // Если сзади есть твердый блок (не воздух и не лава)
                     if (!client.world.getBlockState(neighbor).isAir() && client.world.getBlockState(neighbor).getBlock() != Blocks.LAVA) {
-                        
-                        // 1. Тихо зажимаем Shift (Sneak), чтобы не упасть
                         client.options.sneakKey.setPressed(true);
                         
-                        // 2. Запоминаем текущий поворот камеры
                         float prevYaw = player.getYaw();
                         float prevPitch = player.getPitch();
                         
-                        // 3. Тихо поворачиваем камеру на блок сзади, чтобы античит не спалил
                         Vec3d hitVec = Vec3d.ofCenter(neighbor).add(0, 0.5, 0);
                         double dx = hitVec.x - player.getX();
                         double dy = hitVec.y - player.getEyeY();
@@ -207,12 +236,10 @@ public class Modules {
                         player.setYaw(targetYaw);
                         player.setPitch(targetPitch);
                         
-                        // 4. Ставим блок
                         BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, neighbor, false);
                         client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
                         player.swingHand(Hand.MAIN_HAND);
                         
-                        // 5. Возвращаем камеру обратно
                         player.setYaw(prevYaw);
                         player.setPitch(prevPitch);
                         return;
@@ -220,14 +247,13 @@ public class Modules {
                 }
             }
         } else {
-            // Если под нами блок, отпускаем Shift
             if (client.options.sneakKey.isPressed()) {
                 client.options.sneakKey.setPressed(false);
             }
         }
     }
 
-    // ================== AUTOMINE (БЕЗ ТУПНЯКОВ) ==================
+    // ================== AUTOMINE ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -592,7 +618,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
-    // ================== КРАСИВЫЕ ВИЗУАЛЫ ==================
+    // ================== ВИЗУАЛЫ СКВОЗЬ БЛОКИ ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -603,8 +629,8 @@ public class Modules {
 
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
+            // RenderLayer.getLines() рисует поверх всех блоков (сквозь стены)
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            Vec3d eye = MinecraftClient.getInstance().player != null ? MinecraftClient.getInstance().player.getEyePos() : camPos;
 
             if (xray) {
                 for (BlockPos pos : xrayBlocks) {
@@ -617,6 +643,7 @@ public class Modules {
                     else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; } 
                     else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; } 
                     else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; } 
+                    else if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) { r = 0.2f; g = 0.2f; bl = 0.2f; }
 
                     Box box = new Box(pos).expand(0.002);
                     drawCornerBox(matrices, lines, box, r, g, bl, 1.0f);
