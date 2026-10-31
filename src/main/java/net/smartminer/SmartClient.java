@@ -27,7 +27,6 @@ public class SmartClient implements ClientModInitializer {
     public static List<String> logs = new ArrayList<>();
     private static final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
     
-    // Анимация HUD
     private static Map<String, Long> moduleActivationTime = new HashMap<>();
     private static long startTime = System.currentTimeMillis();
 
@@ -71,7 +70,6 @@ public class SmartClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
-            // КРАСИВЫЙ WATERMARK С FPS
             int fps = MinecraftClient.getInstance().getCurrentFps();
             long uptime = (System.currentTimeMillis() - startTime) / 1000;
             String timeStr = String.format("%02d:%02d", uptime / 60, uptime % 60);
@@ -79,7 +77,6 @@ public class SmartClient implements ClientModInitializer {
             String watermark = "§lSMART §fCLIENT §7| §b" + fps + " FPS §7| §e" + timeStr;
             context.drawTextWithShadow(client.textRenderer, watermark, 5, 5, 0xFFFFFF);
 
-            // СБОР МОДУЛЕЙ
             List<String> activeModules = new ArrayList<>();
             if (modules.autoMine) activeModules.add("AutoMine");
             if (modules.killAura) activeModules.add("KillAura");
@@ -95,7 +92,6 @@ public class SmartClient implements ClientModInitializer {
             int y = 20;
             long currentTime = System.currentTimeMillis();
 
-            // АНИМИРОВАННЫЙ ARRAYLIST
             for (String mod : activeModules) {
                 if (!moduleActivationTime.containsKey(mod)) moduleActivationTime.put(mod, currentTime);
                 long timeEnabled = currentTime - moduleActivationTime.get(mod);
@@ -103,21 +99,17 @@ public class SmartClient implements ClientModInitializer {
                 
                 int width = client.textRenderer.getWidth(mod);
                 
-                // Плавный выезд справа налево
                 int targetX = screenWidth - width - 5;
                 int x = targetX + (int)((1.0f - alpha) * 50); 
 
-                // Градиентная полоска (Неоновый цвет)
                 context.fill(x - 2, y, screenWidth - 2, y + 12, 0x90000000);
-                context.fillGradient(x - 2, y, x, y + 12, 0xFF00FFFF, 0xFF0055FF); // Переход от голубого к синему
+                context.fillGradient(x - 2, y, x, y + 12, 0xFF00FFFF, 0xFF0055FF); 
                 
-                // Текст
                 context.drawTextWithShadow(client.textRenderer, mod, x, y + 2, 0xFFFFFFFF);
                 y += 14;
             }
             moduleActivationTime.keySet().removeIf(key -> !activeModules.contains(key));
 
-            // КРАСИВЫЙ TARGET HUD
             if (modules.killAuraTarget != null && modules.killAuraTarget.isAlive()) {
                 LivingEntity target = modules.killAuraTarget;
                 int cx = client.getWindow().getScaledWidth() / 2;
@@ -130,7 +122,6 @@ public class SmartClient implements ClientModInitializer {
 
                 context.drawCenteredTextWithShadow(client.textRenderer, name, cx, cy + 4, 0xFFFFFF);
                 
-                // Полоска здоровья с градиентом
                 context.fill(cx - 60, cy + 18, cx + 60, cy + 24, 0xFF222222);
                 context.fillGradient(cx - 60, cy + 18, (int)(cx - 60 + (120 * healthPercent)), cy + 24, 0xFF00FF00, 0xFF00AA00);
             }
