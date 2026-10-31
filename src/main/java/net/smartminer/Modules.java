@@ -2,6 +2,7 @@ package net.smartminer;
 
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
 import net.minecraft.client.MinecraftClient;
@@ -31,10 +32,8 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -76,9 +75,6 @@ public class Modules {
     
     public LivingEntity killAuraTarget = null;
 
-    private List<BlockPos> xrayBlocks = new ArrayList<>();
-    private int xrayTimer = 0;
-
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
@@ -97,6 +93,26 @@ public class Modules {
 
     private Random random = new Random();
     private String lastLoggedState = "";
+
+    // ================== МЕТОД ДЛЯ X-RAY (КОТОРЫЙ ИСКАЛ КОМПИЛЯТОР) ==================
+    public boolean isXrayBlock(BlockState state) {
+        Block b = state.getBlock();
+        
+        // Воздух, вода, лава и сундуки всегда видимы
+        if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA) return true;
+        if (b == Blocks.CHEST || b == Blocks.ENDER_CHEST || b == Blocks.TRAPPED_CHEST) return true;
+        
+        // Проверяем выбранные руды
+        if (xrayDiamond && (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE)) return true;
+        if (xrayIron && (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE)) return true;
+        if (xrayGold && (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE)) return true;
+        if (xrayEmerald && (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE)) return true;
+        if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) return true;
+        if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) return true;
+        if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) return true;
+
+        return false; // Всё остальное (камень, земля) будет невидимым
+    }
 
     private void updateState(String newState) {
         this.currentState = newState;
@@ -126,14 +142,6 @@ public class Modules {
 
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
-
-        if (xray) {
-            xrayTimer++;
-            if (xrayTimer >= 20) { 
-                updateXrayBlocks(client, player);
-                xrayTimer = 0;
-            }
-        }
 
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
@@ -176,35 +184,6 @@ public class Modules {
         }
     }
 
-    // ================== УМНЫЙ X-RAY С ВЫБОРОМ РУД ==================
-    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
-        xrayBlocks.clear();
-        BlockPos pPos = player.getBlockPos();
-        int radius = 25; 
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    BlockPos pos = pPos.add(x, y, z);
-                    Block b = client.world.getBlockState(pos).getBlock();
-                    
-                    boolean isTarget = false;
-                    
-                    if (xrayDiamond && (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE)) isTarget = true;
-                    if (xrayIron && (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE)) isTarget = true;
-                    if (xrayGold && (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE)) isTarget = true;
-                    if (xrayEmerald && (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE)) isTarget = true;
-                    if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) isTarget = true;
-                    if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) isTarget = true;
-                    if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) isTarget = true;
-
-                    if (isTarget) xrayBlocks.add(pos);
-                }
-            }
-        }
-    }
-
-    // ================== ЛЕГИТНЫЙ SCAFFOLD ==================
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
         if (player.isOnGround() || player.isTouchingWater() || player.isInLava()) return;
 
@@ -253,7 +232,6 @@ public class Modules {
         }
     }
 
-    // ================== AUTOMINE ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -618,7 +596,6 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
-    // ================== ВИЗУАЛЫ СКВОЗЬ БЛОКИ ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -629,26 +606,7 @@ public class Modules {
 
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
-            // RenderLayer.getLines() рисует поверх всех блоков (сквозь стены)
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-
-            if (xray) {
-                for (BlockPos pos : xrayBlocks) {
-                    Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
-                    float r = 1.0f, g = 1.0f, bl = 1.0f;
-
-                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) { r = 0.0f; g = 1.0f; bl = 1.0f; } 
-                    else if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) { r = 0.0f; g = 1.0f; bl = 0.0f; } 
-                    else if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE) { r = 1.0f; g = 1.0f; bl = 0.0f; } 
-                    else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; } 
-                    else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; } 
-                    else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; } 
-                    else if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) { r = 0.2f; g = 0.2f; bl = 0.2f; }
-
-                    Box box = new Box(pos).expand(0.002);
-                    drawCornerBox(matrices, lines, box, r, g, bl, 1.0f);
-                }
-            }
 
             if (targetBlock != null) {
                 Box box = new Box(targetBlock).expand(0.005);
