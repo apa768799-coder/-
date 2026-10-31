@@ -59,7 +59,6 @@ public class Modules {
     private int afkTicks = 0;
     private int escapeTicks = 0;
     
-    // Анти-залипание и Черный список
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
@@ -82,8 +81,8 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
-        // Очищаем черный список раз в 15 секунд
         long currentTime = System.currentTimeMillis();
+        // Черный список живет 15 секунд
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 15000);
 
         if (fullBright) client.options.getGamma().setValue(10.0);
@@ -149,6 +148,7 @@ public class Modules {
                 lookAt(player, targetBlock);
                 
                 if (client.world.getBlockState(targetBlock).isAir()) {
+                    SmartClient.addLog("Успешно добыл: " + oreNames[targetOreIndex]);
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     targetBlock = null;
                 } else {
@@ -235,23 +235,22 @@ public class Modules {
         }
     }
 
+    // ГЛАВНЫЙ ФИКС: Копаем каждый тик без остановок!
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         if (blacklistedBlocks.containsKey(pos)) return;
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            // Если бьем больше 8 секунд (160 тиков) - это приват или бедрок
-            if (breakStuckTicks > 160) { 
-                updateState("Препятствие! Ищу другое место");
+            if (breakStuckTicks > 160) { // 8 секунд
+                updateState("Приват/Препятствие! Ищу другое место");
+                SmartClient.addLog("Заблокирован блок на " + pos.toShortString());
                 blacklistedBlocks.put(pos, System.currentTimeMillis()); 
-                if (targetBlock != null) {
-                    blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); // Забываем руду
-                }
+                if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); 
                 targetBlock = null;
                 currentlyBreaking = null;
                 breakStuckTicks = 0;
-                escapeTicks = 40; // Отходим 2 секунды
-                player.setYaw(player.getYaw() + 180.0f); // Разворачиваемся
+                escapeTicks = 40; 
+                player.setYaw(player.getYaw() + 180.0f); 
                 return;
             }
         } else {
@@ -259,10 +258,10 @@ public class Modules {
             breakStuckTicks = 0;
         }
 
-        // Копаем каждый тик, чтобы прогресс не сбрасывался!
+        // Вызываем копание КАЖДЫЙ ТИК, чтобы прогресс не сбрасывался!
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
         
-        // Машем рукой для анимации
+        // Машем рукой для визуала
         if (player.age % 4 == 0) {
             player.swingHand(Hand.MAIN_HAND);
         }
