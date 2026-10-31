@@ -23,10 +23,13 @@ public class Modules {
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
+        if (player == null) return;
+
         if (breakCooldown > 0) breakCooldown--;
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
+        // Защита от лавы
         if (client.world.getBlockState(player.getBlockPos().down()).getBlock() == Blocks.LAVA) {
             client.options.jumpKey.setPressed(true);
         } else {
@@ -39,6 +42,7 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
+        // Умный выбор кирки
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -75,7 +79,8 @@ public class Modules {
     private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {
         FishingBobberEntity hook = null;
         for (net.minecraft.entity.Entity e : client.world.getEntities()) {
-            if (e instanceof FishingBobberEntity && e.getOwner() == player) {
+            // ИСПРАВЛЕНО ДЛЯ 1.21.4: getPlayerOwner()
+            if (e instanceof FishingBobberEntity && ((FishingBobberEntity) e).getPlayerOwner() == player) {
                 hook = (FishingBobberEntity) e;
                 break;
             }
@@ -86,7 +91,8 @@ public class Modules {
             player.swingHand(Hand.MAIN_HAND);
             fishTimer = 20; 
         } else if (hook != null) {
-            if (hook.getVelocity().y < -0.08 || hook.isSubmerged()) {
+            // ИСПРАВЛЕНО ДЛЯ 1.21.4: убрали isSubmerged(), смотрим только на скорость
+            if (hook.getVelocity().y < -0.08) {
                 client.interactionManager.interactItem(player, Hand.MAIN_HAND);
                 player.swingHand(Hand.MAIN_HAND);
                 fishTimer = 20;
