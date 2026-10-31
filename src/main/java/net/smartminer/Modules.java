@@ -45,7 +45,6 @@ public class Modules {
     private int afkTicks = 0;
     private Vec3d lastPos = Vec3d.ZERO;
 
-    // Для умного обхода
     private int detourTicks = 0;
     private boolean detourLeft = false;
 
@@ -97,7 +96,6 @@ public class Modules {
             }
         }
 
-        // Если мы в процессе обхода препятствия
         if (detourTicks > 0) {
             player.setYaw(player.getYaw() + (detourLeft ? -15 : 15));
             client.options.forwardKey.setPressed(true);
@@ -113,17 +111,14 @@ public class Modules {
             Vec3d eyePos = player.getEyePos();
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
 
-            // Проверка видимости руды
             BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
             BlockPos hitBlock = hit.getBlockPos();
 
-            // Защита от копания под собой
             if (hitBlock.equals(player.getBlockPos()) || hitBlock.equals(player.getBlockPos().down()) || hitBlock.equals(player.getBlockPos().up())) {
-                lookAt(player, targetBlock); // Просто смотрим на руду, чтобы не копать под собой
+                lookAt(player, targetBlock); 
                 return;
             }
 
-            // Если перед нами стена, а руда за ней - копаем стену
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
                 double distToWall = player.getPos().distanceTo(Vec3d.ofCenter(hitBlock));
                 if (distToWall <= 4.5) {
@@ -135,19 +130,16 @@ public class Modules {
                         breakCooldown = 2;
                     }
                 } else {
-                    // Умный шаг (не идем в пропасть)
                     if (canWalkForward(client, player)) {
                         lookAt(player, hitBlock);
                         client.options.forwardKey.setPressed(true);
                     } else {
-                        // Впереди обрыв, пытаемся обойти
-                        startDetour(); 
+                        startDetour(client); // ТУТ ИСПРАВЛЕНО
                     }
                 }
                 return; 
             }
 
-            // Если руда видна
             double distToOre = player.getPos().distanceTo(targetCenter);
             if (distToOre > 3.5) {
                 if (canWalkForward(client, player)) {
@@ -157,14 +149,13 @@ public class Modules {
                     double moved = player.getPos().squaredDistanceTo(lastPos);
                     if (moved < 0.001) {
                         stuckTicks++;
-                        if (stuckTicks > 10) { startDetour(); stuckTicks = 0; }
+                        if (stuckTicks > 10) { startDetour(client); stuckTicks = 0; } // ТУТ ИСПРАВЛЕНО
                     } else stuckTicks = 0;
                     lastPos = player.getPos();
                 } else {
-                    startDetour();
+                    startDetour(client); // ТУТ ИСПРАВЛЕНО
                 }
             } else {
-                // Руда близко, копаем
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
@@ -175,26 +166,24 @@ public class Modules {
                 }
             }
         } else {
-            // Если руды нет, просто идем вперед (с проверкой на ямы)
             if (canWalkForward(client, player)) {
                 client.options.forwardKey.setPressed(true);
             } else {
-                startDetour();
+                startDetour(client); // ТУТ ИСПРАВЛЕНО
             }
         }
     }
 
-    // Проверка, есть ли под ногами впереди блок (защита от падения)
     private boolean canWalkForward(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
         BlockPos frontDown = front.down();
         BlockPos frontDown2 = frontDown.down();
-        // Если под блоком впереди - воздух, и мы не в воде/на лестнице
         return !client.world.getBlockState(frontDown).isAir() || !client.world.getBlockState(frontDown2).isAir();
     }
 
-    private void startDetour() {
-        detourTicks = 20; // 1 секунда обхода
+    // ТУТ ИСПРАВЛЕНО: добавлен параметр MinecraftClient client
+    private void startDetour(MinecraftClient client) {
+        detourTicks = 20; 
         detourLeft = Math.random() > 0.5;
         client.options.jumpKey.setPressed(true);
     }
@@ -269,13 +258,10 @@ public class Modules {
         }
     }
 
-    // Безопасная KillAura (не бьет сквозь стены, ждет кулдаун)
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
-        // Ждем полной готовности удара
         if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
         if (attackCooldown > 0) return;
 
-        // Выбираем ближайшую цель
         LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
             e -> e != player && e.isAlive())
             .stream()
@@ -283,12 +269,10 @@ public class Modules {
             .orElse(null);
 
         if (target != null) {
-            // Проверка видимости (чтобы не бить сквозь стены)
             Vec3d eye = player.getEyePos();
             Vec3d targetPos = target.getEyePos();
             BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
             
-            // Если луч не встретил блоков на пути - цель видна
             if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
                 if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
                     for (int i = 0; i < 9; i++) {
@@ -302,7 +286,7 @@ public class Modules {
                 lookAtEntity(player, target);
                 client.interactionManager.attackEntity(player, target);
                 player.swingHand(Hand.MAIN_HAND);
-                attackCooldown = 12; // Задержка
+                attackCooldown = 12; 
             }
         }
     }
@@ -316,7 +300,7 @@ public class Modules {
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); // Плавнее
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); 
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 15.0f));
     }
 
