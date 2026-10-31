@@ -1,346 +1,481 @@
 package net.smartminer;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.MathHelper;
+
+import java.awt.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class ClickGui extends Screen {
-    // --- ЦВЕТА (Pulse Visuals Style) ---
-    private final int COLOR_BG = 0xF5101010;          // Почти черный фон с прозрачностью
-    private final int COLOR_SIDEBAR = 0xFF0A0A0A;     // Темная панель
-    private final int COLOR_CARD = 0xFF181818;        // Карточка
-    private final int COLOR_CARD_HOVER = 0xFF222222;  // Карточка при наведении
-    private final int COLOR_ACCENT = 0xFFFF8C00;      // Оранжевый
-    private final int COLOR_ACCENT_DARK = 0xFFB35A00; // Темно-оранжевый
-    private final int COLOR_TEXT = 0xFFFFFFFF;        // Белый
-    private final int COLOR_TEXT_DIM = 0xFF888888;    // Серый
-    private final int COLOR_BORDER = 0xFF2A2A2A;      // Рамка
-    private final int COLOR_TOGGLE_OFF = 0xFF333333;  // Выключенный тумблер
 
-    private int currentTab = 0; 
-    private int menuX, menuY;
-    private boolean isDragging = false;
-    private int dragOffsetX, dragOffsetY;
+    public static Modules modules;
+    public static final int ACCENT_COLOR = new Color(0, 255, 180).getRGB();
+    public static final int BG_COLOR = new Color(15, 15, 20, 220).getRGB();
+    public static final int PANEL_COLOR = new Color(25, 25, 30, 240).getRGB();
+    public static final int HEADER_COLOR = new Color(35, 35, 45, 255).getRGB();
+    public static final int TEXT_COLOR = new Color(220, 220, 220).getRGB();
+    public static final int TEXT_DARK = new Color(150, 150, 150).getRGB();
 
-    private final int MENU_WIDTH = 560;
-    private final int MENU_HEIGHT = 380; 
+    private final List<Panel> panels = new ArrayList<>();
+    private Panel draggingPanel = null;
+    private double dragX, dragY;
 
     public ClickGui() {
-        super(Text.literal("Pulse Visuals"));
-    }
+        super(Text.literal("SmartMiner GUI"));
+        if (modules == null) modules = SmartClient.modules;
 
-    @Override
-    protected void init() {
-        if (menuX == 0 && menuY == 0) {
-            menuX = (this.width - MENU_WIDTH) / 2;
-            menuY = (this.height - MENU_HEIGHT) / 2;
-        }
+        // Инициализация панелей
+        int x = 20;
+        panels.add(new Panel("Combat", x, 20));
+        panels.add(new Panel("Movement", x + 120, 20));
+        panels.add(new Panel("Render", x + 240, 20));
+        panels.add(new Panel("World", x + 360, 20));
+        panels.add(new Panel("Player", x + 480, 20));
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        this.renderBackground(context, mouseX, mouseY, delta);
+        // Затемнение фона
+        context.fill(0, 0, this.width, this.height, new Color(0, 0, 0, 100).getRGB());
 
-        int x1 = menuX;
-        int y1 = menuY;
-        int x2 = x1 + MENU_WIDTH;
-        int y2 = y1 + MENU_HEIGHT;
-
-        // 1. Глубокая тень под меню
-        drawRoundedRect(context, x1 + 8, y1 + 8, MENU_WIDTH, MENU_HEIGHT, 6, 0x70000000);
-        
-        // 2. Основной фон (Стекло)
-        drawRoundedRect(context, x1, y1, MENU_WIDTH, MENU_HEIGHT, 6, COLOR_BG);
-        
-        // 3. Внешняя неоновая рамка
-        drawRoundedBorder(context, x1, y1, MENU_WIDTH, MENU_HEIGHT, 6, 0xFF333333);
-
-        // 4. Сайдбар
-        int catWidth = 130;
-        context.fill(x1 + 6, y1 + 6, x1 + catWidth, y2 - 6, COLOR_SIDEBAR);
-        // Разделитель (тонкая линия)
-        context.fill(x1 + catWidth, y1 + 10, x1 + catWidth + 1, y2 - 10, 0xFF222222);
-
-        // 5. Логотип
-        context.drawText(this.textRenderer, "§l§fPULSE", x1 + 18, y1 + 20, COLOR_TEXT, false);
-        context.drawText(this.textRenderer, "§l§6VISUALS", x1 + 18, y1 + 32, COLOR_ACCENT, false);
-
-        // 6. Вкладки
-        drawCategory(context, "VISUALS", 0, y1 + 75, mouseX, mouseY, x1);
-        drawCategory(context, "COMBAT", 1, y1 + 105, mouseX, mouseY, x1);
-        drawCategory(context, "MOVEMENT", 2, y1 + 135, mouseX, mouseY, x1);
-        drawCategory(context, "PLAYER", 3, y1 + 165, mouseX, mouseY, x1);
-        drawCategory(context, "CONFIG", 4, y1 + 195, mouseX, mouseY, x1);
-        drawCategory(context, "LOGS", 5, y1 + 225, mouseX, mouseY, x1);
-
-        // 7. Правая панель
-        int startX = x1 + catWidth + 25;
-        int startY = y1 + 20;
-        int x2Pos = x2 - 25;
-
-        // Заголовок
-        context.drawText(this.textRenderer, "§l" + getCategoryName(), startX, startY, COLOR_TEXT, false);
-        
-        // Кнопка [X]
-        boolean closeHover = isHovered(mouseX, mouseY, x2 - 35, y1 + 15, 15, 15);
-        context.drawText(this.textRenderer, closeHover ? "§c[X]" : "§7[X]", x2 - 35, y1 + 15, 0xFFFFFFFF, false);
-        
-        int modStartY = startY + 40;
-
-        // 8. Сетка модулей
-        if (currentTab == 0) { 
-            drawCard(context, "FullBright", "Видеть в темноте", SmartClient.modules.fullBright, startX, modStartY, mouseX, mouseY);
-            drawCard(context, "X-Ray", "Подсветка руды", SmartClient.modules.xray, startX + 190, modStartY, mouseX, mouseY);
-            
-            drawCard(context, "PlayerESP", "Скелеты игроков", SmartClient.modules.playerESP, startX, modStartY + 55, mouseX, mouseY);
-            drawCard(context, "ItemESP", "Подсветка предметов", SmartClient.modules.itemESP, startX + 190, modStartY + 55, mouseX, mouseY);
-            
-            drawCard(context, "ChestESP", "Подсветка сундуков", SmartClient.modules.chestESP, startX, modStartY + 110, mouseX, mouseY);
-            drawCard(context, "Tracers", "Линии к цели", SmartClient.modules.tracers, startX + 190, modStartY + 110, mouseX, mouseY);
-            
-            drawCard(context, "GlowESP", "Свечение сущностей", SmartClient.modules.glowESP, startX, modStartY + 165, mouseX, mouseY);
-            drawCard(context, "HoleESP", "Безопасные дырки", SmartClient.modules.holeESP, startX + 190, modStartY + 165, mouseX, mouseY);
-        } 
-        else if (currentTab == 1) { 
-            drawCard(context, "KillAura", "Атака целей", SmartClient.modules.killAura, startX, modStartY, mouseX, mouseY);
-            drawCard(context, "AutoTotem", "Авто-тотем", SmartClient.modules.autoTotem, startX + 190, modStartY, mouseX, mouseY);
-            
-            drawCard(context, "Criticals", "Критические удары", SmartClient.modules.criticals, startX, modStartY + 55, mouseX, mouseY);
-            drawCard(context, "AutoTrap", "Трапка обсидианом", SmartClient.modules.autoTrap, startX + 190, modStartY + 55, mouseX, mouseY);
-            
-            drawCard(context, "DamageNumbers", "Числа урона", SmartClient.modules.damageNumbers, startX, modStartY + 110, mouseX, mouseY);
-            drawCard(context, "HitCounter", "Счетчик серии", SmartClient.modules.hitCounter, startX + 190, modStartY + 110, mouseX, mouseY);
-        } 
-        else if (currentTab == 2) { 
-            drawCard(context, "AutoMine", "Авто-шахта", SmartClient.modules.autoMine, startX, modStartY, mouseX, mouseY);
-            drawCard(context, "AutoFish", "Авто-рыбалка", SmartClient.modules.autoFish, startX + 190, modStartY, mouseX, mouseY);
-            
-            drawCard(context, "Scaffold", "Авто-мост", SmartClient.modules.scaffold, startX, modStartY + 55, mouseX, mouseY);
-            drawCard(context, "NoFall", "Без урона от падения", SmartClient.modules.noFall, startX + 190, modStartY + 55, mouseX, mouseY);
-            
-            drawCard(context, "Sprint", "Вечный бег", SmartClient.modules.sprint, startX, modStartY + 110, mouseX, mouseY);
-        }
-        else if (currentTab == 3) { 
-            drawCard(context, "Anti-AFK", "Защита от кика", SmartClient.modules.antiAfk, startX, modStartY, mouseX, mouseY);
-            drawCard(context, "AutoArmor", "Авто-броня", SmartClient.modules.autoArmor, startX + 190, modStartY, mouseX, mouseY);
-            
-            drawCard(context, "ChestStealer", "Авто-лут", SmartClient.modules.chestStealer, startX, modStartY + 55, mouseX, mouseY);
-            drawCard(context, "Velocity", "Анти-кнокбек", SmartClient.modules.velocity, startX + 190, modStartY + 55, mouseX, mouseY);
-            
-            drawCard(context, "AutoRespawn", "Авто-возрождение", SmartClient.modules.autoRespawn, startX, modStartY + 110, mouseX, mouseY);
-            drawCard(context, "LowHP", "Пульсация при HP<3", SmartClient.modules.lowHp, startX + 190, modStartY + 110, mouseX, mouseY);
-        }
-        else if (currentTab == 4) { 
-            drawButton(context, "Сохранить конфиг", startX, modStartY, 190, 24, mouseX, mouseY, 0xFF00AA00);
-            drawButton(context, "Загрузить конфиг", startX, modStartY + 35, 190, 24, mouseX, mouseY, 0xFF0055FF);
-        }
-        else if (currentTab == 5) { 
-            int logY = modStartY;
-            int startLogIndex = Math.max(0, SmartClient.logs.size() - 12);
-            for (int i = startLogIndex; i < SmartClient.logs.size(); i++) {
-                String log = SmartClient.logs.get(i);
-                if (log.length() > 70) log = log.substring(0, 67) + "...";
-                int color = 0xFFAAAAAA;
-                if (log.contains("Найдена")) color = 0xFF00FF00; 
-                else if (log.contains("Приват") || log.contains("Опасность")) color = 0xFFFF5555; 
-                context.drawText(this.textRenderer, log, startX, logY, color, false);
-                logY += 12;
-            }
+        // Рендер панелей
+        for (Panel panel : panels) {
+            panel.render(context, mouseX, mouseY, delta);
         }
 
-        context.drawText(this.textRenderer, "§8Right Shift - закрыть", x1 + 18, y2 - 20, 0x555555, false);
+        // Рендер Watermark (Логотип)
+        String watermark = "SmartMiner v4.0";
+        int wmWidth = this.textRenderer.getWidth(watermark);
+        context.fill(10, 10, 10 + wmWidth + 10, 25, BG_COLOR);
+        context.drawBorder(10, 10, wmWidth + 10, 15, ACCENT_COLOR);
+        context.drawTextWithShadow(this.textRenderer, watermark, 15, 14, ACCENT_COLOR);
+
+        // Рендер ArrayList (Список включенных модулей)
+        renderArrayList(context);
+
+        super.render(context, mouseX, mouseY, delta);
     }
 
-    private String getCategoryName() {
-        return switch (currentTab) {
-            case 0 -> "ВИЗУАЛЫ";
-            case 1 -> "БОЙ";
-            case 2 -> "ДВИЖЕНИЕ";
-            case 3 -> "ИГРОК";
-            case 4 -> "КОНФИГ";
-            case 5 -> "ЛОГИ";
-            default -> "";
-        };
-    }
+    private void renderArrayList(DrawContext context) {
+        List<String> active = new ArrayList<>();
+        if (modules.killAura) active.add("KillAura");
+        if (modules.autoCrystal) active.add("AutoCrystal");
+        if (modules.autoMine) active.add("AutoMine");
+        if (modules.scaffold) active.add("Scaffold");
+        if (modules.surround) active.add("Surround");
+        if (modules.xray) active.add("X-Ray");
+        if (modules.playerESP) active.add("PlayerESP");
+        if (modules.sprint) active.add("Sprint");
+        if (modules.fullBright) active.add("FullBright");
 
-    // Красивая вкладка с градиентом и неоновой полоской
-    private void drawCategory(DrawContext context, String name, int tabIndex, int y, int mouseX, int mouseY, int x1) {
-        boolean hover = isHovered(mouseX, mouseY, x1 + 5, y - 5, 120, 20);
-        boolean active = (currentTab == tabIndex);
+        active.sort((a, b) -> textRenderer.getWidth(b) - textRenderer.getWidth(a));
 
-        if (active) {
-            // Градиент от оранжевого к прозрачному
-            context.fillGradient(x1 + 5, y - 5, x1 + 125, y + 15, 0x60FF8C00, 0x00FF8C00);
-            // Яркая полоска слева
-            context.fill(x1 + 5, y - 5, x1 + 8, y + 15, COLOR_ACCENT); 
-            context.drawText(this.textRenderer, name, x1 + 18, y, COLOR_ACCENT, false);
-        } else if (hover) {
-            context.fill(x1 + 5, y - 5, x1 + 125, y + 15, 0x15FFFFFF);
-            context.drawText(this.textRenderer, name, x1 + 18, y, COLOR_TEXT, false);
-        } else {
-            context.drawText(this.textRenderer, name, x1 + 18, y, COLOR_TEXT_DIM, false);
+        int y = 25;
+        for (String s : active) {
+            int width = textRenderer.getWidth(s) + 8;
+            int x = this.width - width - 5;
+            
+            // Фон
+            context.fill(x, y, this.width - 5, y + 12, new Color(20, 20, 25, 200).getRGB());
+            // Полоска слева
+            context.fill(x, y, x + 2, y + 12, ACCENT_COLOR);
+            // Текст
+            context.drawTextWithShadow(textRenderer, s, x + 5, y + 2, -1);
+            y += 14;
         }
-    }
-
-    // Карточка с настоящим переключателем (пилюлей)
-    private void drawCard(DrawContext context, String name, String desc, boolean state, int x, int y, int mouseX, int mouseY) {
-        int width = 175;
-        int height = 45;
-        boolean hover = isHovered(mouseX, mouseY, x, y, width, height);
-
-        // Фон карточки
-        context.fill(x, y, x + width, y + height, hover ? COLOR_CARD_HOVER : COLOR_CARD);
-        // Рамка
-        drawRoundedBorder(context, x, y, width, height, 4, hover ? 0xFF444444 : COLOR_BORDER);
-
-        // Текст
-        context.drawText(this.textRenderer, "§l" + name, x + 10, y + 8, COLOR_TEXT, false);
-        context.drawText(this.textRenderer, "§7" + desc, x + 10, y + 20, COLOR_TEXT_DIM, false);
-
-        // --- Переключатель (Toggle Pill) ---
-        int toggleX = x + width - 42;
-        int toggleY = y + 15;
-        int toggleW = 32;
-        int toggleH = 14;
-
-        if (state) {
-            // Включен (Градиент)
-            context.fillGradient(toggleX, toggleY, toggleX + toggleW, toggleY + toggleH, COLOR_ACCENT, COLOR_ACCENT_DARK);
-            // Белый кружок справа
-            context.fill(toggleX + 18, toggleY + 2, toggleX + 30, toggleY + 12, 0xFFFFFFFF);
-        } else {
-            // Выключен (Серый)
-            context.fill(toggleX, toggleY, toggleX + toggleW, toggleY + toggleH, COLOR_TOGGLE_OFF);
-            // Белый кружок слева
-            context.fill(toggleX + 2, toggleY + 2, toggleX + 14, toggleY + 12, 0xFFFFFFFF);
-        }
-    }
-
-    private void drawButton(DrawContext context, String text, int x, int y, int w, int h, int mouseX, int mouseY, int color) {
-        boolean hover = isHovered(mouseX, mouseY, x, y, w, h);
-        context.fill(x, y, x + w, y + h, hover ? color : 0xFF1A1A1A);
-        drawRoundedBorder(context, x, y, w, h, 4, hover ? color : COLOR_BORDER);
-        context.drawCenteredTextWithShadow(this.textRenderer, text, x + w / 2, y + (h - 8) / 2, 0xFFFFFF);
-    }
-
-    // --- КАСТОМНЫЙ РЕНДЕР ДЛЯ СКРУГЛЕНИЯ ---
-    
-    private void drawRoundedRect(DrawContext context, int x, int y, int w, int h, int r, int color) {
-        context.fill(x + r, y, x + w - r, y + h, color);
-        context.fill(x, y + r, x + r, y + h - r, color);
-        context.fill(x + w - r, y + r, x + w, y + h - r, color);
-        // Углы
-        context.fill(x + 1, y + 1, x + r, y + r, color);
-        context.fill(x + w - r, y + 1, x + w - 1, y + r, color);
-        context.fill(x + 1, y + h - r, x + r, y + h - 1, color);
-        context.fill(x + w - r, y + h - r, x + w - 1, y + h - 1, color);
-    }
-
-    private void drawRoundedBorder(DrawContext context, int x, int y, int w, int h, int r, int color) {
-        context.fill(x + r, y, x + w - r, y + 1, color);
-        context.fill(x + r, y + h - 1, x + w - r, y + h, color);
-        context.fill(x, y + r, x + 1, y + h - r, color);
-        context.fill(x + w - 1, y + r, x + w, y + h - r, color);
-        context.fill(x + 1, y + 1, x + 2, y + 2, color);
-        context.fill(x + w - 2, y + 1, x + w - 1, y + 2, color);
-        context.fill(x + 1, y + h - 2, x + 2, y + h - 1, color);
-        context.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, color);
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) {
-            if (isHovered(mouseX, mouseY, menuX + MENU_WIDTH - 40, menuY + 10, 20, 20)) {
-                this.close();
-                return true;
-            }
-            if (isHovered(mouseX, mouseY, menuX, menuY, MENU_WIDTH, 50)) {
-                isDragging = true;
-                dragOffsetX = (int) (mouseX - menuX);
-                dragOffsetY = (int) (mouseY - menuY);
-                return true;
+        if (button == 0) { // ЛКМ
+            for (Panel panel : panels) {
+                if (panel.mouseClicked(mouseX, mouseY, button)) {
+                    draggingPanel = panel;
+                    dragX = mouseX - panel.x;
+                    dragY = mouseY - panel.y;
+                    return true;
+                }
             }
         }
-
-        if (button != 0) return super.mouseClicked(mouseX, mouseY, button);
-
-        int x1 = menuX;
-        int y1 = menuY;
-
-        if (isHovered(mouseX, mouseY, x1, y1 + 70, 130, 20)) currentTab = 0;
-        if (isHovered(mouseX, mouseY, x1, y1 + 100, 130, 20)) currentTab = 1;
-        if (isHovered(mouseX, mouseY, x1, y1 + 130, 130, 20)) currentTab = 2;
-        if (isHovered(mouseX, mouseY, x1, y1 + 160, 130, 20)) currentTab = 3;
-        if (isHovered(mouseX, mouseY, x1, y1 + 190, 130, 20)) currentTab = 4;
-        if (isHovered(mouseX, mouseY, x1, y1 + 220, 130, 20)) currentTab = 5;
-
-        int startX = x1 + 130 + 25;
-        int modStartY = y1 + 20 + 40;
-        
-        if (currentTab == 0) { 
-            if (isHovered(mouseX, mouseY, startX, modStartY, 175, 45)) SmartClient.modules.fullBright = !SmartClient.modules.fullBright;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY, 175, 45)) SmartClient.modules.xray = !SmartClient.modules.xray;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 55, 175, 45)) SmartClient.modules.playerESP = !SmartClient.modules.playerESP;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 55, 175, 45)) SmartClient.modules.itemESP = !SmartClient.modules.itemESP;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 110, 175, 45)) SmartClient.modules.chestESP = !SmartClient.modules.chestESP;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 110, 175, 45)) SmartClient.modules.tracers = !SmartClient.modules.tracers;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 165, 175, 45)) SmartClient.modules.glowESP = !SmartClient.modules.glowESP;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 165, 175, 45)) SmartClient.modules.holeESP = !SmartClient.modules.holeESP;
-        } 
-        else if (currentTab == 1) { 
-            if (isHovered(mouseX, mouseY, startX, modStartY, 175, 45)) SmartClient.modules.killAura = !SmartClient.modules.killAura;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY, 175, 45)) SmartClient.modules.autoTotem = !SmartClient.modules.autoTotem;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 55, 175, 45)) SmartClient.modules.criticals = !SmartClient.modules.criticals;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 55, 175, 45)) SmartClient.modules.autoTrap = !SmartClient.modules.autoTrap;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 110, 175, 45)) SmartClient.modules.damageNumbers = !SmartClient.modules.damageNumbers;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 110, 175, 45)) SmartClient.modules.hitCounter = !SmartClient.modules.hitCounter;
-        }
-        else if (currentTab == 2) { 
-            if (isHovered(mouseX, mouseY, startX, modStartY, 175, 45)) SmartClient.modules.autoMine = !SmartClient.modules.autoMine;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY, 175, 45)) SmartClient.modules.autoFish = !SmartClient.modules.autoFish;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 55, 175, 45)) SmartClient.modules.scaffold = !SmartClient.modules.scaffold;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 55, 175, 45)) SmartClient.modules.noFall = !SmartClient.modules.noFall;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 110, 175, 45)) SmartClient.modules.sprint = !SmartClient.modules.sprint;
-        }
-        else if (currentTab == 3) { 
-            if (isHovered(mouseX, mouseY, startX, modStartY, 175, 45)) SmartClient.modules.antiAfk = !SmartClient.modules.antiAfk;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY, 175, 45)) SmartClient.modules.autoArmor = !SmartClient.modules.autoArmor;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 55, 175, 45)) SmartClient.modules.chestStealer = !SmartClient.modules.chestStealer;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 55, 175, 45)) SmartClient.modules.velocity = !SmartClient.modules.velocity;
-            if (isHovered(mouseX, mouseY, startX, modStartY + 110, 175, 45)) SmartClient.modules.autoRespawn = !SmartClient.modules.autoRespawn;
-            if (isHovered(mouseX, mouseY, startX + 190, modStartY + 110, 175, 45)) SmartClient.modules.lowHp = !SmartClient.modules.lowHp;
-        }
-        else if (currentTab == 4) { 
-            if (isHovered(mouseX, mouseY, startX, modStartY, 190, 24)) ConfigManager.saveConfig(SmartClient.modules);
-            if (isHovered(mouseX, mouseY, startX, modStartY + 35, 190, 24)) ConfigManager.loadConfig(SmartClient.modules);
-        }
-
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) isDragging = false;
+        draggingPanel = null;
+        for (Panel panel : panels) {
+            panel.mouseReleased(mouseX, mouseY, button);
+        }
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-        if (isDragging) {
-            menuX = (int) (mouseX - dragOffsetX);
-            menuY = (int) (mouseY - dragOffsetY);
+        if (draggingPanel != null) {
+            draggingPanel.x = (int) (mouseX - dragX);
+            draggingPanel.y = (int) (mouseY - dragY);
             return true;
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
     }
 
-    private boolean isHovered(double mouseX, double mouseY, int x, int y, int w, int h) {
-        return mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        for (Panel panel : panels) {
+            panel.mouseScrolled(mouseX, mouseY, verticalAmount);
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     @Override
     public boolean shouldPause() {
         return false;
+    }
+
+    // ==========================================
+    // КЛАСС ПАНЕЛИ
+    // ==========================================
+    public class Panel {
+        public String title;
+        public int x, y;
+        public int width = 110;
+        public int headerHeight = 18;
+        public int itemHeight = 16;
+        public int scroll = 0;
+        public int maxHeight = 250;
+
+        public List<ModuleButton> buttons = new ArrayList<>();
+        public boolean dragging = false;
+        public boolean extended = true;
+
+        public Panel(String title, int x, int y) {
+            this.title = title;
+            this.x = x;
+            this.y = y;
+            initButtons();
+        }
+
+        private void initButtons() {
+            switch (title) {
+                case "Combat":
+                    buttons.add(new ModuleButton("KillAura", this, () -> modules.killAura, v -> modules.killAura = v)
+                            .addSlider("Range", () -> modules.killAuraRange, v -> modules.killAuraRange = v.floatValue(), 1f, 6f));
+                    buttons.add(new ModuleButton("AutoCrystal", this, () -> modules.autoCrystal, v -> modules.autoCrystal = v));
+                    buttons.add(new ModuleButton("Surround", this, () -> modules.surround, v -> modules.surround = v));
+                    buttons.add(new ModuleButton("AutoTrap", this, () -> modules.autoTrap, v -> modules.autoTrap = v));
+                    buttons.add(new ModuleButton("Velocity", this, () -> modules.velocity, v -> modules.velocity = v));
+                    break;
+                case "Movement":
+                    buttons.add(new ModuleButton("AutoMine", this, () -> modules.autoMine, v -> modules.autoMine = v)
+                            .addSlider("MinHP", () -> (float)modules.minHpToMine, v -> modules.minHpToMine = v.intValue(), 1f, 20f)
+                            .addSlider("Priority", () -> (float)modules.minOrePriority, v -> modules.minOrePriority = v.intValue(), 0f, 100f));
+                    buttons.add(new ModuleButton("Scaffold", this, () -> modules.scaffold, v -> modules.scaffold = v));
+                    buttons.add(new ModuleButton("Sprint", this, () -> modules.sprint, v -> modules.sprint = v));
+                    buttons.add(new ModuleButton("NoFall", this, () -> modules.noFall, v -> modules.noFall = v));
+                    break;
+                case "Render":
+                    buttons.add(new ModuleButton("X-Ray", this, () -> modules.xray, v -> modules.xray = v));
+                    buttons.add(new ModuleButton("PlayerESP", this, () -> modules.playerESP, v -> modules.playerESP = v));
+                    buttons.add(new ModuleButton("Tracers", this, () -> modules.tracers, v -> modules.tracers = v));
+                    buttons.add(new ModuleButton("HoleESP", this, () -> modules.holeESP, v -> modules.holeESP = v));
+                    buttons.add(new ModuleButton("FullBright", this, () -> modules.fullBright, v -> modules.fullBright = v));
+                    break;
+                case "World":
+                    buttons.add(new ModuleButton("AutoFish", this, () -> modules.autoFish, v -> modules.autoFish = v));
+                    buttons.add(new ModuleButton("ChestStealer", this, () -> modules.chestStealer, v -> modules.chestStealer = v));
+                    buttons.add(new ModuleButton("AntiAFK", this, () -> modules.antiAfk, v -> modules.antiAfk = v));
+                    break;
+                case "Player":
+                    buttons.add(new ModuleButton("AutoTotem", this, () -> modules.autoTotem, v -> modules.autoTotem = v));
+                    buttons.add(new ModuleButton("AutoArmor", this, () -> modules.autoArmor, v -> modules.autoArmor = v));
+                    buttons.add(new ModuleButton("AutoEat", this, () -> modules.autoEat, v -> modules.autoEat = v));
+                    break;
+            }
+        }
+
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            // Ограничение скролла
+            int totalHeight = headerHeight;
+            for (ModuleButton b : buttons) totalHeight += b.getHeight();
+            int maxScroll = Math.max(0, totalHeight - maxHeight);
+
+            // Отрисовка панели
+            context.fill(x, y, x + width, y + maxHeight, PANEL_COLOR);
+            context.drawBorder(x, y, width, maxHeight, new Color(50, 50, 60).getRGB());
+            
+            // Заголовок
+            context.fill(x, y, x + width, y + headerHeight, HEADER_COLOR);
+            context.drawTextWithShadow(textRenderer, title, x + 5, y + 5, ACCENT_COLOR);
+            
+            // Кнопка свернуть
+            context.drawTextWithShadow(textRenderer, extended ? "-" : "+", x + width - 12, y + 5, TEXT_COLOR);
+
+            // Рендер кнопок
+            if (extended) {
+                context.enableScissor(x, y + headerHeight, x + width, y + maxHeight);
+                int cy = y + headerHeight - scroll;
+                for (ModuleButton b : buttons) {
+                    b.render(context, mouseX, mouseY, x, cy, width);
+                    cy += b.getHeight();
+                }
+                context.disableScissor();
+            }
+        }
+
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + headerHeight) {
+                if (mouseX >= x + width - 15) {
+                    extended = !extended;
+                } else {
+                    dragging = true;
+                    return true;
+                }
+            }
+
+            if (extended && mouseX >= x && mouseX <= x + width && mouseY > y + headerHeight && mouseY < y + maxHeight) {
+                int cy = y + headerHeight - scroll;
+                for (ModuleButton b : buttons) {
+                    if (mouseY >= cy && mouseY <= cy + b.getHeight()) {
+                        if (b.mouseClicked(mouseX, mouseY, button, x, cy, width)) return true;
+                    }
+                    cy += b.getHeight();
+                }
+            }
+            return false;
+        }
+
+        public void mouseReleased(double mouseX, double mouseY, int button) {
+            dragging = false;
+            for (ModuleButton b : buttons) b.mouseReleased(mouseX, mouseY, button);
+        }
+
+        public void mouseScrolled(double mouseX, double mouseY, double amount) {
+            if (mouseX >= x && mouseX <= x + width && mouseY > y + headerHeight && mouseY < y + maxHeight) {
+                int totalHeight = 0;
+                for (ModuleButton b : buttons) totalHeight += b.getHeight();
+                int maxScroll = Math.max(0, totalHeight - maxHeight);
+                
+                scroll -= (int) (amount * 15);
+                if (scroll < 0) scroll = 0;
+                if (scroll > maxScroll) scroll = maxScroll;
+            }
+        }
+    }
+
+    // ==========================================
+    // КЛАСС КНОПКИ МОДУЛЯ
+    // ==========================================
+    public class ModuleButton {
+        public String name;
+        public Panel parent;
+        public java.util.function.BooleanSupplier getter;
+        public java.util.function.Consumer<Boolean> setter;
+        public List<SettingComponent> settings = new ArrayList<>();
+        public boolean expanded = false;
+        public float animation = 0f;
+
+        public ModuleButton(String name, Panel parent, java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {
+            this.name = name;
+            this.parent = parent;
+            this.getter = getter;
+            this.setter = setter;
+        }
+
+        public ModuleButton addSlider(String name, java.util.function.Supplier<Float> getter, java.util.function.Consumer<Float> setter, float min, float max) {
+            settings.add(new SettingComponent(name, SettingType.SLIDER, getter, setter, min, max));
+            return this;
+        }
+
+        public ModuleButton addCheckbox(String name, java.util.function.BooleanSupplier getter, java.util.function.Consumer<Boolean> setter) {
+            settings.add(new SettingComponent(name, SettingType.CHECKBOX, () -> getter.getAsBoolean() ? 1f : 0f, v -> setter.accept(v > 0.5f), 0, 1));
+            return this;
+        }
+
+        public int getHeight() {
+            return 16 + (int) (animation * (settings.size() * 14));
+        }
+
+        public void render(DrawContext context, int mouseX, int mouseY, int px, int py, int width) {
+            boolean hovered = mouseX >= px && mouseX <= px + width && mouseY >= py && mouseY <= py + 16;
+            boolean enabled = getter.getAsBoolean();
+
+            // Анимация раскрытия
+            float target = expanded ? 1f : 0f;
+            animation = MathHelper.lerp(0.2f, animation, target);
+
+            // Фон кнопки
+            int color = enabled ? ACCENT_COLOR : (hovered ? new Color(60, 60, 70).getRGB() : new Color(35, 35, 45).getRGB());
+            context.fill(px, py, px + width, py + 16, color);
+            context.drawBorder(px, py, width, 16, new Color(50, 50, 60).getRGB());
+
+            // Текст
+            int textColor = enabled ? 0 : TEXT_COLOR;
+            context.drawTextWithShadow(textRenderer, name, px + 4, py + 4, textColor);
+
+            // Стрелочка, если есть настройки
+            if (!settings.isEmpty()) {
+                context.drawTextWithShadow(textRenderer, expanded ? "v" : ">", px + width - 10, py + 4, textColor);
+            }
+
+            // Рендер настроек
+            if (animation > 0.01f) {
+                context.enableScissor(px, py + 16, px + width, py + 16 + (int) (animation * (settings.size() * 14)));
+                int sy = py + 16;
+                for (SettingComponent s : settings) {
+                    s.render(context, mouseX, mouseY, px, sy, width, animation);
+                    sy += (int)(14 * animation);
+                }
+                context.disableScissor();
+            }
+        }
+
+        public boolean mouseClicked(double mouseX, double mouseY, int button, int px, int py, int width) {
+            if (mouseX >= px && mouseX <= px + width && mouseY >= py && mouseY <= py + 16) {
+                if (button == 0) {
+                    setter.accept(!getter.getAsBoolean());
+                } else if (button == 1 && !settings.isEmpty()) {
+                    expanded = !expanded;
+                }
+                return true;
+            }
+
+            if (expanded && animation > 0.9f) {
+                int sy = py + 16;
+                for (SettingComponent s : settings) {
+                    if (s.mouseClicked(mouseX, mouseY, button, px, sy, width)) return true;
+                    sy += 14;
+                }
+            }
+            return false;
+        }
+
+        public void mouseReleased(double mouseX, double mouseY, int button) {
+            for (SettingComponent s : settings) s.mouseReleased(mouseX, mouseY, button);
+        }
+    }
+
+    // ==========================================
+    // КЛАСС НАСТРОЙКИ (СЛАЙДЕР / ЧЕКБОКС)
+    // ==========================================
+    public enum SettingType { SLIDER, CHECKBOX }
+
+    public class SettingComponent {
+        public String name;
+        public SettingType type;
+        public java.util.function.Supplier<Float> getter;
+        public java.util.function.Consumer<Float> setter;
+        public float min, max;
+        public boolean dragging = false;
+
+        public SettingComponent(String name, SettingType type, java.util.function.Supplier<Float> getter, java.util.function.Consumer<Float> setter, float min, float max) {
+            this.name = name;
+            this.type = type;
+            this.getter = getter;
+            this.setter = setter;
+            this.min = min;
+            this.max = max;
+        }
+
+        public void render(DrawContext context, int mouseX, int mouseY, int px, int py, int width, float alpha) {
+            float value = getter.get();
+
+            if (type == SettingType.SLIDER) {
+                // Название настройки
+                context.drawTextWithShadow(textRenderer, name, px + 8, py + 2, TEXT_DARK);
+                
+                // Ползунок
+                int sliderY = py + 10;
+                int sliderWidth = width - 16;
+                float percent = (value - min) / (max - min);
+                percent = MathHelper.clamp(percent, 0f, 1f);
+
+                // Фон слайдера
+                context.fill(px + 8, sliderY, px + 8 + sliderWidth, sliderY + 2, new Color(50, 50, 60).getRGB());
+                // Заполнение
+                context.fill(px + 8, sliderY, px + 8 + (int)(sliderWidth * percent), sliderY + 2, ACCENT_COLOR);
+                // Кружок
+                context.fill(px + 8 + (int)(sliderWidth * percent) - 2, sliderY - 2, px + 8 + (int)(sliderWidth * percent) + 2, sliderY + 4, -1);
+                
+                // Значение (справа)
+                String valStr = String.format("%.1f", value);
+                context.drawTextWithShadow(textRenderer, valStr, px + width - 20, py + 2, TEXT_COLOR);
+
+            } else if (type == SettingType.CHECKBOX) {
+                boolean checked = value > 0.5f;
+                // Квадратик
+                context.fill(px + 8, py + 2, px + 16, py + 10, new Color(50, 50, 60).getRGB());
+                if (checked) context.fill(px + 10, py + 4, px + 14, py + 8, ACCENT_COLOR);
+                
+                // Текст
+                context.drawTextWithShadow(textRenderer, name, px + 20, py + 2, TEXT_DARK);
+            }
+        }
+
+        public boolean mouseClicked(double mouseX, double mouseY, int button, int px, int py, int width) {
+            if (button != 0) return false;
+
+            if (type == SettingType.SLIDER) {
+                int sliderY = py + 10;
+                if (mouseY >= sliderY - 4 && mouseY <= sliderY + 4 && mouseX >= px + 8 && mouseX <= px + width - 8) {
+                    dragging = true;
+                    updateValue(mouseX, px, width);
+                    return true;
+                }
+            } else if (type == SettingType.CHECKBOX) {
+                if (mouseX >= px + 8 && mouseX <= px + width && mouseY >= py + 2 && mouseY <= py + 10) {
+                    setter.accept(getter.get() > 0.5f ? 0f : 1f);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public void mouseReleased(double mouseX, double mouseY, int button) {
+            dragging = false;
+        }
+        
+        // Обновление значения слайдера при перетаскивании (вызывается из Screen)
+        public void updateValue(double mouseX, int px, int width) {
+            if (!dragging) return;
+            int sliderWidth = width - 16;
+            float percent = (float)(mouseX - (px + 8)) / sliderWidth;
+            percent = MathHelper.clamp(percent, 0f, 1f);
+            float val = min + (max - min) * percent;
+            setter.accept(val);
+        }
+    }
+
+    // Хак для обновления слайдера при движении мыши
+    @Override
+    public boolean mouseMoved(double mouseX, double mouseY) {
+        for (Panel panel : panels) {
+            for (ModuleButton btn : panel.buttons) {
+                if (btn.expanded && btn.animation > 0.9f) {
+                    for (SettingComponent s : btn.settings) {
+                        if (s.dragging && s.type == SettingType.SLIDER) {
+                            // Координаты кнопки и настройки
+                            int px = panel.x;
+                            int sy = panel.y + panel.headerHeight - panel.scroll;
+                            for (ModuleButton b : panel.buttons) {
+                                if (b == btn) break;
+                                sy += b.getHeight();
+                            }
+                            sy += 16; // Смещение до настроек
+                            for (SettingComponent sc : btn.settings) {
+                                if (sc == s) break;
+                                sy += 14;
+                            }
+                            s.updateValue(mouseX, px, panel.width);
+                        }
+                    }
+                }
+            }
+        }
+        return super.mouseMoved(mouseX, mouseY);
     }
 }
