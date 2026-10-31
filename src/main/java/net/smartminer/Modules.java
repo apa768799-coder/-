@@ -51,17 +51,22 @@ public class Modules {
 
     public String currentState = "Ожидание";
     public BlockPos targetBlock = null;
-    public BlockPos targetChest = null;
     private ItemEntity targetItem = null;
+    private BlockPos targetChest = null;
 
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
     private int escapeTicks = 0;
     
+    // ИИ Переменные
+    private int targetTimer = 0;
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
+    private Vec3d lastPlayerPos = Vec3d.ZERO;
+    private int stuckTicks = 0;
+    private int strafeTimer = 0;
 
     private Random random = new Random();
     private String lastLoggedState = "";
@@ -80,10 +85,10 @@ public class Modules {
 
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
+        if (strafeTimer > 0) strafeTimer--;
 
         long currentTime = System.currentTimeMillis();
-        // Черный список живет 15 секунд
-        blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 15000);
+        blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000); // ЧС на 20 сек
 
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
@@ -111,6 +116,7 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
+    // ================== УМНЫЙ ИИ AUTOMINE ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -119,6 +125,7 @@ public class Modules {
             return;
         }
 
+        // 1. Проверяем кирку
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -128,19 +135,59 @@ public class Modules {
             }
         }
 
+        // 2. Проверка на застревание (Анти-Ступор)
+        if (player.getPos().distanceTo(lastPlayerPos) < 0.05 && (player.input.movementForward != 0 || currentlyBreaking != null)) {
+            stuckTicks++;
+            if (stuckTicks > 30) { // Застряли на 1.5 секунды
+                updateState("Пытаюсь выбраться");
+                client.options.jumpKey.setPressed(true);
+                player.setYaw(player.getYaw() + (random.nextBoolean() ? 45 : -45)); // Прыгаем и вертимся
+                strafeTimer = 15;
+                if (stuckTicks > 60) { // Если совсем застряли - отмена цели
+                    if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                    targetBlock = null;
+                    stuckTicks = 0;
+                }
+            }
+        } else {
+            stuckTicks = 0;
+        }
+        lastPlayerPos = player.getPos();
+
+        if (strafeTimer > 0) {
+            client.options.leftKey.setPressed(random.nextBoolean());
+            client.options.rightKey.setPressed(!client.options.leftKey.isPressed());
+            return;
+        } else {
+            client.options.leftKey.setPressed(false);
+            client.options.rightKey.setPressed(false);
+        }
+
+        // 3. Валидация и поиск цели
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
-            updateState("Поиск руды");
+            updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
+            targetTimer = 0;
             if (targetBlock != null) {
-                SmartClient.addLog("Найдена руда: " + oreNames[targetOreIndex] + " на " + targetBlock.toShortString());
+                SmartClient.addLog("Найдена цель: " + oreNames[targetOreIndex]);
             }
         }
 
+        // 4. Идем и копаем
         if (targetBlock != null) {
+            targetTimer++;
+            if (targetTimer > 400) { // 20 секунд на одну руду
+                SmartClient.addLog("Слишком долго, отмена цели");
+                blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                targetBlock = null;
+                return;
+            }
+
             Vec3d eyePos = player.getEyePos();
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
+            // Если мы близко
             if (dist <= 4.5) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
@@ -148,7 +195,6 @@ public class Modules {
                 lookAt(player, targetBlock);
                 
                 if (client.world.getBlockState(targetBlock).isAir()) {
-                    SmartClient.addLog("Успешно добыл: " + oreNames[targetOreIndex]);
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     targetBlock = null;
                 } else {
@@ -157,40 +203,45 @@ public class Modules {
                 return;
             }
 
+            // Если мы далеко
+            updateState("Иду к цели");
+            lookAt(player, targetBlock);
+
+            // Проверка на пропасть/лаву впереди
+            BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
+            if (client.world.getBlockState(front.down()).isAir() || client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
+                updateState("Впереди опасность! Стоп");
+                client.options.forwardKey.setPressed(false);
+                blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                targetBlock = null;
+                return;
+            }
+
+            // Проверяем, есть ли стена
             BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
             BlockPos hitBlock = hit.getBlockPos();
 
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
-                updateState("Копаю стену к руде");
+                updateState("Копаю путь к руде");
                 client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false);
                 lookAt(player, hitBlock); 
                 breakBlock(client, player, hitBlock);
                 return;
             }
 
-            updateState("Иду к руде");
-            lookAt(player, targetBlock);
+            // Путь свободен, идем
             client.options.forwardKey.setPressed(true);
-
-            if (player.horizontalCollision) {
-                BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-                if (!client.world.getBlockState(front).isAir() && client.world.getBlockState(front.up()).isAir()) {
-                    if (player.isOnGround()) client.options.jumpKey.setPressed(true);
-                } else {
-                    client.options.jumpKey.setPressed(false);
-                }
+            if (player.horizontalCollision && player.isOnGround()) {
+                client.options.jumpKey.setPressed(true);
             } else {
                 client.options.jumpKey.setPressed(false);
             }
             return;
         }
 
+        // 5. Если руды нет - ищем лут
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
-            if (targetItem != null) {
-                SmartClient.addLog("Найден дроп: " + targetItem.getStack().getName().getString());
-            }
         }
         if (targetItem != null) {
             updateState("Сбор лута");
@@ -198,58 +249,53 @@ public class Modules {
             if (dist > 1.2) {
                 lookAtEntity(player, targetItem);
                 client.options.forwardKey.setPressed(true);
-                client.options.jumpKey.setPressed(false);
             } else {
                 client.options.forwardKey.setPressed(false);
             }
             return;
         }
 
-        updateState("Копаю туннель");
-        lookAt(player, player.getBlockPos().offset(player.getHorizontalFacing(), 2));
-        client.options.forwardKey.setPressed(true);
-
-        BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-        BlockPos frontUp = front.up();
+        // 6. Если ничего нет - копаем туннель
+        updateState("Руд нет, копаю туннель");
+        BlockPos tunnelFront = player.getBlockPos().offset(player.getHorizontalFacing());
         
-        if (client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
+        // Защита туннеля
+        if (client.world.getBlockState(tunnelFront.down()).getBlock() == Blocks.LAVA) {
             player.setYaw(player.getYaw() + 90.0f); 
-            SmartClient.addLog("Впереди лава! Меняю направление.");
             return;
         }
 
-        if (!client.world.getBlockState(front).isAir() && !blacklistedBlocks.containsKey(front)) {
-            breakBlock(client, player, front);
-            return;
-        }
-        
-        if (!client.world.getBlockState(frontUp).isAir() && !blacklistedBlocks.containsKey(frontUp)) {
-            breakBlock(client, player, frontUp);
-            return;
-        }
-
-        if (player.horizontalCollision && player.isOnGround()) {
-            client.options.jumpKey.setPressed(true);
+        if (!client.world.getBlockState(tunnelFront).isAir() && !blacklistedBlocks.containsKey(tunnelFront)) {
+            lookAt(player, tunnelFront);
+            breakBlock(client, player, tunnelFront);
+        } else if (!client.world.getBlockState(tunnelFront.up()).isAir() && !blacklistedBlocks.containsKey(tunnelFront.up())) {
+            lookAt(player, tunnelFront.up());
+            breakBlock(client, player, tunnelFront.up());
         } else {
-            client.options.jumpKey.setPressed(false);
+            client.options.forwardKey.setPressed(true);
         }
     }
 
-    // ГЛАВНЫЙ ФИКС: Копаем каждый тик без остановок!
+    // БЕЗОПАСНОЕ КОПАНИЕ
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
-        if (blacklistedBlocks.containsKey(pos)) return;
+        Block b = client.world.getBlockState(pos).getBlock();
+        
+        // Не копаем бедрок и барьеры
+        if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
+            blacklistedBlocks.put(pos, System.currentTimeMillis());
+            return;
+        }
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            if (breakStuckTicks > 160) { // 8 секунд
-                updateState("Приват/Препятствие! Ищу другое место");
-                SmartClient.addLog("Заблокирован блок на " + pos.toShortString());
+            if (breakStuckTicks > 100) { // 5 секунд
+                updateState("Блок не ломается (Приват?)");
                 blacklistedBlocks.put(pos, System.currentTimeMillis()); 
                 if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); 
                 targetBlock = null;
                 currentlyBreaking = null;
                 breakStuckTicks = 0;
-                escapeTicks = 40; 
+                escapeTicks = 20; 
                 player.setYaw(player.getYaw() + 180.0f); 
                 return;
             }
@@ -258,15 +304,12 @@ public class Modules {
             breakStuckTicks = 0;
         }
 
-        // Вызываем копание КАЖДЫЙ ТИК, чтобы прогресс не сбрасывался!
+        // Копаем без остановки
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-        
-        // Машем рукой для визуала
-        if (player.age % 4 == 0) {
-            player.swingHand(Hand.MAIN_HAND);
-        }
+        if (player.age % 4 == 0) player.swingHand(Hand.MAIN_HAND);
     }
 
+    // Ищем руду только в зоне видимости по высоте
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
@@ -280,7 +323,7 @@ public class Modules {
         };
 
         for (int x = -15; x <= 15; x++) {
-            for (int y = -15; y <= 15; y++) {
+            for (int y = -10; y <= 10; y++) { // Ограничили высоту, чтобы не тупить на потолок
                 for (int z = -15; z <= 15; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     if (blacklistedBlocks.containsKey(pos)) continue;
@@ -304,6 +347,7 @@ public class Modules {
             .orElse(null);
     }
 
+    // ================== ОСТАЛЬНЫЕ ФУНКЦИИ ==================
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
@@ -467,8 +511,8 @@ public class Modules {
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 8.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 8.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 10.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 10.0f));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
@@ -483,7 +527,7 @@ public class Modules {
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 8.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 8.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 10.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 10.0f));
     }
 }
