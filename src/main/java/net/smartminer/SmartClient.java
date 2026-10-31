@@ -3,6 +3,7 @@ package net.smartminer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
@@ -19,16 +20,13 @@ public class SmartClient implements ClientModInitializer {
     public static KeyBinding guiKey, mineKey, fishKey, xrayKey, afkKey;
     public static Modules modules = new Modules();
     
-    // СИСТЕМА ЛОГОВ
     public static List<String> logs = new ArrayList<>();
     private static final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
 
     public static void addLog(String message) {
         String time = timeFormat.format(new Date());
         logs.add("[" + time + "] " + message);
-        if (logs.size() > 100) { // Храним последние 100 строк
-            logs.remove(0);
-        }
+        if (logs.size() > 100) logs.remove(0);
     }
 
     @Override
@@ -61,17 +59,30 @@ public class SmartClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
-            // Водяной знак и состояние ИИ
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v35", 8, 8, 0xFFFFFF);
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v40", 8, 8, 0xFFFFFF);
             if (modules.autoMine) {
                 context.drawTextWithShadow(client.textRenderer, "§7AI: §e" + modules.currentState, 8, 20, 0xFFFFFF);
+            }
+        });
+
+        // АНТИ-ПРИВАТ ЧЕРЕЗ ЧАТ
+        ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+            String text = message.getString();
+            if (text.contains("Вы не можете ломать блоки") || text.contains("Вы не можете взаимодействовать")) {
+                if (modules.autoMine) {
+                    modules.autoMine = false;
+                    addLog("§c⚠ ПРИВАТ! AutoMine выключен.");
+                    if (MinecraftClient.getInstance().player != null) {
+                        MinecraftClient.getInstance().player.sendMessage(net.minecraft.text.Text.literal("§c[Smart] Обнаружен приват! Авто-шахта выключена."), false);
+                    }
+                }
             }
         });
     }
 
     private void msg(MinecraftClient client, String name, boolean state) {
         String status = name + ": " + (state ? "ON" : "OFF");
-        addLog(status); // Пишем в лог при включении
+        addLog(status);
         if (client.player != null) client.player.sendMessage(net.minecraft.text.Text.literal("§b[Smart] " + name + ": " + (state ? "§aON" : "§cOFF")), true);
     }
 }
