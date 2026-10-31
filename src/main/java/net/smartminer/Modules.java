@@ -11,7 +11,8 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
-import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
 import net.minecraft.util.Hand;
@@ -50,30 +51,29 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
-        // FullBright
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
 
-        // AutoSprint
         if (player.isOnGround() && player.input.movementForward > 0) player.setSprinting(true);
 
-        // Anti-AFK
+        // AutoJump (Прыгает на 1 блок, если идешь в стену)
+        if (player.horizontalCollision && player.isOnGround() && player.input.movementForward > 0) {
+            client.options.jumpKey.setPressed(true);
+        }
+
         if (antiAfk) {
             afkTicks++;
             if (afkTicks > 100) {
                 player.setYaw(player.getYaw() + (float)(Math.random() * 4 - 2));
-                if (Math.random() > 0.5) client.options.jumpKey.setPressed(true);
                 afkTicks = 0;
-            } else client.options.jumpKey.setPressed(false);
+            }
         }
 
-        // Умная еда
         if (player.getHungerManager().getFoodLevel() < 15 && !player.getMainHandStack().isEmpty() && player.getMainHandStack().contains(DataComponentTypes.FOOD)) {
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             player.swingHand(Hand.MAIN_HAND);
         }
 
-        // Защита от лавы
         if (client.world.getBlockState(player.getBlockPos().down()).getBlock() == Blocks.LAVA) {
             client.options.jumpKey.setPressed(true);
             client.options.forwardKey.setPressed(true);
@@ -86,7 +86,6 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // Авто-выбор кирки
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -104,24 +103,17 @@ public class Modules {
             Vec3d eyePos = player.getEyePos();
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
 
-            // --- УМНЫЙ RAYCAST (Проверка, видно ли руду) ---
             BlockHitResult hit = client.world.raycast(new RaycastContext(
                     eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player
             ));
             
             BlockPos hitBlock = hit.getBlockPos();
-
-            // СТРОГАЯ ЗАЩИТА: НИКОГДА не копаем блок под ногами и под ногами спереди
-            if (hitBlock.equals(player.getBlockPos().down()) || hitBlock.equals(player.getBlockPos().down(2))) {
-                // Если бот посмотрел вниз, заставляем его смотреть прямо
-                lookAt(player, player.getBlockPos().offset(player.getHorizontalFacing()));
-                return;
+            if (hitBlock.equals(player.getBlockPos()) || hitBlock.equals(player.getBlockPos().down())) {
+                return; // НЕ КОПАЕМ ПОД СОБОЙ
             }
 
-            // Если луч уперся НЕ в руду, значит перед нами стена/камень
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
                 double distToWall = player.getPos().distanceTo(Vec3d.ofCenter(hitBlock));
-                
                 if (distToWall <= 4.5) {
                     client.options.forwardKey.setPressed(false);
                     lookAt(player, hitBlock);
@@ -137,28 +129,16 @@ public class Modules {
                 return; 
             }
 
-            // --- ЕСЛИ ПУТЬ СВОБОДЕН ---
             double distToOre = player.getPos().distanceTo(targetCenter);
-            
             if (distToOre > 3.5) {
                 lookAt(player, targetBlock);
                 client.options.forwardKey.setPressed(true);
                 
-                // Если цель выше нас на 1.5 блока и мы уперлись - прыгаем
-                if (targetBlock.getY() > player.getY() + 1.0 && player.horizontalCollision) {
-                    client.options.jumpKey.setPressed(true);
-                } else {
-                    client.options.jumpKey.setPressed(false);
-                }
-
-                // Анти-Застревание
                 double moved = player.getPos().squaredDistanceTo(lastPos);
                 if (moved < 0.001) stuckTicks++; else stuckTicks = 0;
-                if (stuckTicks > 15) client.options.jumpKey.setPressed(true);
+                if (stuckTicks > 15) client.options.jumpKey.setPressed(true); // Прыжок если застряли
                 lastPos = player.getPos();
-
             } else {
-                // Руда близко, копаем её
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
@@ -169,7 +149,6 @@ public class Modules {
                 }
             }
         } else {
-            client.options.jumpKey.setPressed(false);
             client.options.forwardKey.setPressed(true);
         }
     }
@@ -215,7 +194,6 @@ public class Modules {
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
             VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); 
-
             if (MinecraftClient.getInstance().player != null) {
                 Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
                 Vec3d targetVec = Vec3d.ofCenter(targetBlock);
@@ -245,9 +223,11 @@ public class Modules {
         }
     }
 
+    // ИСПРАВЛЕННАЯ KILLAURA
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (attackCooldown > 0) return;
         
+        // Ищем меч в хотбаре
         if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof SwordItem || player.getInventory().getStack(i).getItem() instanceof AxeItem) {
@@ -257,18 +237,17 @@ public class Modules {
             }
         }
 
-        for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
-            if (entity instanceof MobEntity && entity.isAlive() && player.distanceTo(entity) < 3.8) {
-                lookAtEntity(player, entity);
-                if (player.isOnGround()) {
-                    client.options.jumpKey.setPressed(true);
-                } else {
-                    client.interactionManager.attackEntity(player, entity);
-                    player.swingHand(Hand.MAIN_HAND);
-                    attackCooldown = 12; 
-                }
-                break;
-            }
+        // Получаем список ВСЕХ живых сущностей в радиусе 4 блоков (игроки + мобы)
+        Box searchBox = player.getBoundingBox().expand(4.0);
+        for (LivingEntity target : client.world.getEntitiesByClass(LivingEntity.class, searchBox, e -> e != player && e.isAlive())) {
+            // Проверка на кулдаун атаки (чтобы не спамить)
+            if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
+            
+            lookAtEntity(player, target);
+            client.interactionManager.attackEntity(player, target);
+            player.swingHand(Hand.MAIN_HAND);
+            attackCooldown = 12; // Задержка между ударами
+            break;
         }
     }
 
