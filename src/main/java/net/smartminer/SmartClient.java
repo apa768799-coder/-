@@ -10,13 +10,26 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
 
 public class SmartClient implements ClientModInitializer {
     public static KeyBinding guiKey, mineKey, fishKey, xrayKey, afkKey;
     public static Modules modules = new Modules();
+    
+    // СИСТЕМА ЛОГОВ
+    public static List<String> logs = new ArrayList<>();
+    private static final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
+
+    public static void addLog(String message) {
+        String time = timeFormat.format(new Date());
+        logs.add("[" + time + "] " + message);
+        if (logs.size() > 100) { // Храним последние 100 строк
+            logs.remove(0);
+        }
+    }
 
     @Override
     public void onInitializeClient() {
@@ -48,41 +61,17 @@ public class SmartClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
             
-            int screenWidth = client.getWindow().getScaledWidth();
-            int y = 8;
-            
-            List<String> active = new ArrayList<>();
-            if (modules.autoMine) active.add("AutoMine §7[" + modules.oreNames[modules.targetOreIndex] + "]");
-            if (modules.autoFish) active.add("AutoFish");
-            if (modules.killAura) active.add("KillAura");
-            if (modules.fullBright) active.add("FullBright");
-            if (modules.antiAfk) active.add("Anti-AFK");
-            if (modules.autoArmor) active.add("AutoArmor");
-            if (modules.scaffold) active.add("Scaffold");
-            if (modules.velocity) active.add("Velocity");
-            if (modules.chestStealer) active.add("ChestStealer");
-            
-            active.sort(Comparator.comparingInt(String::length).reversed());
-
-            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v30", 8, 8, 0xFFFFFF);
-
-            // Показываем "мозги" бота (что он делает прямо сейчас)
+            // Водяной знак и состояние ИИ
+            context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v35", 8, 8, 0xFFFFFF);
             if (modules.autoMine) {
-                context.drawTextWithShadow(client.textRenderer, "§7AI State: §e" + modules.currentState, 8, 20, 0xFFFFFF);
-            }
-
-            for (String mod : active) {
-                int width = client.textRenderer.getWidth(mod);
-                int x = screenWidth - width - 8;
-                context.fill(x - 4, y, screenWidth - 4, y + 11, 0x70000000);
-                context.fill(x - 4, y, x - 3, y + 11, 0xFF00FFFF); 
-                context.drawTextWithShadow(client.textRenderer, mod, x, y + 2, 0xFFFFFF);
-                y += 13;
+                context.drawTextWithShadow(client.textRenderer, "§7AI: §e" + modules.currentState, 8, 20, 0xFFFFFF);
             }
         });
     }
 
     private void msg(MinecraftClient client, String name, boolean state) {
+        String status = name + ": " + (state ? "ON" : "OFF");
+        addLog(status); // Пишем в лог при включении
         if (client.player != null) client.player.sendMessage(net.minecraft.text.Text.literal("§b[Smart] " + name + ": " + (state ? "§aON" : "§cOFF")), true);
     }
 }
