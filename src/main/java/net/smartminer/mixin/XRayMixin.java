@@ -19,6 +19,7 @@ public class XRayMixin {
     @Inject(method = "renderBlock", at = @At("HEAD"), cancellable = true)
     private void onRenderBlock(BlockState state, BlockPos pos, BlockRenderView world, MatrixStack matrices, VertexConsumer vertexConsumer, boolean cull, Random random, CallbackInfo ci) {
         if (SmartClient.modules.xray) {
+            // Если блок НЕ находится в списке разрешенных (не руда), отменяем его отрисовку
             if (!SmartClient.modules.isXrayBlock(state)) {
                 ci.cancel();
             }
