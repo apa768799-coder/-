@@ -54,7 +54,7 @@ public class Modules {
     public boolean noFall = false;
     public boolean autoRespawn = false;
     public boolean sprint = false;
-    public boolean fastPlace = false; // Оставляем кнопку в меню, но логика отключена
+    public boolean fastPlace = false;
     public boolean playerESP = false;
     public boolean xray = false;
 
@@ -140,8 +140,6 @@ public class Modules {
         }
 
         if (noFall && player.fallDistance > 2.0f) player.fallDistance = 0.0f; 
-
-        // FastPlace логика убрана из-за ошибки доступа
 
         if (player.getHungerManager().getFoodLevel() < 15) {
             doAutoEat(client, player);
@@ -265,7 +263,8 @@ public class Modules {
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
-            if (dist <= 4.5) {
+            // Проверка дистанции: копаем только если ближе 4.0 блоков (античит-безопасно)
+            if (dist <= 4.0) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
@@ -363,6 +362,7 @@ public class Modules {
         }
     }
 
+    // === ИСПРАВЛЕННОЕ КОПАНИЕ (БЕЗ GHOST BLOCK) ===
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         Block b = client.world.getBlockState(pos).getBlock();
         if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
@@ -372,6 +372,7 @@ public class Modules {
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
+            // Если блок не ломается 5 секунд (100 тиков), значит это приват или баг
             if (breakStuckTicks > 100) { 
                 updateState("Приват! Разворот");
                 blacklistedBlocks.put(pos, System.currentTimeMillis()); 
@@ -384,8 +385,17 @@ public class Modules {
             breakStuckTicks = 0;
         }
 
+        // 1. Копаем КАЖДЫЙ ТИК (как зажатая ЛКМ)
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-        if (player.age % (3 + random.nextInt(3)) == 0) player.swingHand(Hand.MAIN_HAND);
+        
+        // 2. Синхронизируем руку каждый тик (античит видит нормальную анимацию)
+        player.swingHand(Hand.MAIN_HAND);
+        
+        // 3. Если мы копаем и камера смотрит не на блок, сбрасываем (античит спалит)
+        if (!client.crosshairTarget.getType().equals(HitResult.Type.BLOCK)) {
+            currentlyBreaking = null;
+            breakStuckTicks = 0;
+        }
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
