@@ -55,15 +55,15 @@ public class Modules {
     public boolean noFall = false;
     public boolean autoRespawn = false;
     public boolean sprint = false;
-    
+
     // Визуалы
     public boolean fullBright = false;
     public boolean playerESP = false;
     public boolean xray = false;
     public boolean itemESP = false;
     public boolean chestESP = false;
-    public boolean glowESP = false; 
-    public boolean tracers = false; 
+    public boolean glowESP = false;
+    public boolean tracers = false;
     public boolean trajectory = false;
     public boolean criticals = false;
     public boolean hitParticles = false;
@@ -74,6 +74,11 @@ public class Modules {
     // НОВЫЕ МОДУЛИ v3.0
     public boolean holeESP = false;
     public boolean autoTrap = false;
+
+    // Умный AutoMine (новые настройки)
+    public boolean smartOreSelection = true;   // true = копать всё ценное по приоритету
+    public int     minOrePriority    = 0;      // 0 = все руды, 30 = без угля, 90 = только алмаз/изумруд
+    public int     minHpToMine       = 6;      // не копать, если HP ниже
 
     // Руды для X-Ray
     public boolean xrayDiamond = true;
@@ -91,7 +96,7 @@ public class Modules {
     public BlockPos targetBlock = null;
     private ItemEntity targetItem = null;
     private BlockPos targetChest = null;
-    
+
     public LivingEntity killAuraTarget = null;
     public int currentHitCount = 0;
 
@@ -110,7 +115,10 @@ public class Modules {
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
-    
+
+    // Очередь незаконченной жилы (умный AutoMine)
+    private final Map<BlockPos, Long> veinBlocks = new HashMap<>();
+
     private int stuckTicks = 0;
     private Vec3d lastPos = Vec3d.ZERO;
     private int strafeTicks = 0;
@@ -120,6 +128,30 @@ public class Modules {
     private String lastLoggedState = "";
 
     public List<DamageNumber> damageNumbersList = new ArrayList<>();
+
+    // Приоритеты руд для умного AutoMine
+    private static final Map<Block, Integer> ORE_PRIORITY = new HashMap<>();
+    static {
+        ORE_PRIORITY.put(Blocks.DIAMOND_ORE,            100);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_DIAMOND_ORE,  100);
+        ORE_PRIORITY.put(Blocks.EMERALD_ORE,             95);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_EMERALD_ORE,   95);
+        ORE_PRIORITY.put(Blocks.ANCIENT_DEBRIS,          90);
+        ORE_PRIORITY.put(Blocks.GOLD_ORE,                75);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_GOLD_ORE,      75);
+        ORE_PRIORITY.put(Blocks.NETHER_GOLD_ORE,         70);
+        ORE_PRIORITY.put(Blocks.IRON_ORE,                60);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_IRON_ORE,      60);
+        ORE_PRIORITY.put(Blocks.LAPIS_ORE,               55);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_LAPIS_ORE,     55);
+        ORE_PRIORITY.put(Blocks.REDSTONE_ORE,            50);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_REDSTONE_ORE,  50);
+        ORE_PRIORITY.put(Blocks.NETHER_QUARTZ_ORE,       45);
+        ORE_PRIORITY.put(Blocks.COPPER_ORE,              40);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_COPPER_ORE,    40);
+        ORE_PRIORITY.put(Blocks.COAL_ORE,                30);
+        ORE_PRIORITY.put(Blocks.DEEPSLATE_COAL_ORE,      30);
+    }
 
     public void copyFrom(Modules other) {
         this.autoMine = other.autoMine;
@@ -134,7 +166,7 @@ public class Modules {
         this.noFall = other.noFall;
         this.autoRespawn = other.autoRespawn;
         this.sprint = other.sprint;
-        
+
         this.fullBright = other.fullBright;
         this.playerESP = other.playerESP;
         this.xray = other.xray;
@@ -160,6 +192,11 @@ public class Modules {
         this.xrayLapis = other.xrayLapis;
 
         this.targetOreIndex = other.targetOreIndex;
+
+        // Новые настройки умного AutoMine
+        this.smartOreSelection = other.smartOreSelection;
+        this.minOrePriority    = other.minOrePriority;
+        this.minHpToMine       = other.minHpToMine;
     }
 
     public boolean isXrayBlock(BlockState state) {
@@ -173,7 +210,7 @@ public class Modules {
         if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) return true;
         if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) return true;
         if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) return true;
-        return false; 
+        return false;
     }
 
     private void updateState(String newState) {
@@ -185,12 +222,12 @@ public class Modules {
     }
 
     public void triggerRetreat() {
-        this.escapeTicks = 40; 
+        this.escapeTicks = 40;
         this.targetBlock = null;
         this.currentlyBreaking = null;
         this.breakStuckTicks = 0;
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        if (player != null) player.setYaw(player.getYaw() + 180.0f + (float)(Math.random() * 30 - 15)); 
+        if (player != null) player.setYaw(player.getYaw() + 180.0f + (float)(Math.random() * 30 - 15));
     }
 
     public void onTick(MinecraftClient client) {
@@ -208,7 +245,7 @@ public class Modules {
 
         if (xray) {
             xrayTimer++;
-            if (xrayTimer >= 20) { 
+            if (xrayTimer >= 20) {
                 updateXrayBlocks(client, player);
                 xrayTimer = 0;
             }
@@ -245,11 +282,11 @@ public class Modules {
             player.setSprinting(true);
         }
 
-        if (noFall && player.fallDistance > 2.0f) player.fallDistance = 0.0f; 
+        if (noFall && player.fallDistance > 2.0f) player.fallDistance = 0.0f;
 
         if (player.getHungerManager().getFoodLevel() < 15) {
             doAutoEat(client, player);
-            return; 
+            return;
         }
 
         if (antiAfk) {
@@ -278,7 +315,7 @@ public class Modules {
     private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
         xrayBlocks.clear();
         BlockPos pPos = player.getBlockPos();
-        int radius = 25; 
+        int radius = 25;
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
@@ -309,21 +346,21 @@ public class Modules {
                     if (!client.world.getBlockState(pos).isAir()) continue;
                     if (!client.world.getBlockState(pos.up()).isAir()) continue;
                     if (!client.world.getBlockState(pos.up(2)).isAir()) continue;
-                    
+
                     Block floor = client.world.getBlockState(pos.down()).getBlock();
                     if (floor != Blocks.OBSIDIAN && floor != Blocks.BEDROCK) continue;
-                    
+
                     Block n1 = client.world.getBlockState(pos.north()).getBlock();
                     Block s1 = client.world.getBlockState(pos.south()).getBlock();
                     Block e1 = client.world.getBlockState(pos.east()).getBlock();
                     Block w1 = client.world.getBlockState(pos.west()).getBlock();
-                    
+
                     int solidCount = 0;
                     if (n1 == Blocks.OBSIDIAN || n1 == Blocks.BEDROCK) solidCount++;
                     if (s1 == Blocks.OBSIDIAN || s1 == Blocks.BEDROCK) solidCount++;
                     if (e1 == Blocks.OBSIDIAN || e1 == Blocks.BEDROCK) solidCount++;
                     if (w1 == Blocks.OBSIDIAN || w1 == Blocks.BEDROCK) solidCount++;
-                    
+
                     if (solidCount >= 2) holeBlocks.add(pos);
                 }
             }
@@ -370,7 +407,6 @@ public class Modules {
         if (killAuraTarget == null || !killAuraTarget.isAlive()) return;
         if (player.getPos().distanceTo(killAuraTarget.getPos()) > 5.0) return;
 
-        // Ищем обсидиан в хотбаре
         int obbySlot = -1;
         for (int i = 0; i < 9; i++) {
             if (player.getInventory().getStack(i).getItem() == Items.OBSIDIAN) {
@@ -386,15 +422,15 @@ public class Modules {
 
         BlockPos targetPos = killAuraTarget.getBlockPos();
         Direction[] dirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
-        
+
         for (Direction dir : dirs) {
             BlockPos placePos = targetPos.offset(dir);
             if (!client.world.getBlockState(placePos).isAir()) continue;
             if (!client.world.getBlockState(placePos.up()).isAir()) continue;
-            
+
             BlockPos neighbor = placePos.down();
             if (client.world.getBlockState(neighbor).isAir()) continue;
-            
+
             Vec3d hitVec = Vec3d.ofCenter(neighbor).add(0, 0.5, 0);
             BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, neighbor, false);
             client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
@@ -403,12 +439,23 @@ public class Modules {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    //               УМНЫЙ AUTO MINE (обновлён)
+    // ═══════════════════════════════════════════════════════════
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
             updateState("Отступаю от привата...");
-            client.options.forwardKey.setPressed(true); 
+            client.options.forwardKey.setPressed(true);
             client.options.backKey.setPressed(false);
+            client.options.jumpKey.setPressed(false);
+            return;
+        }
+
+        // Пауза при низком HP
+        if (player.getHealth() < minHpToMine) {
+            updateState("Мало HP (" + (int) player.getHealth() + ") — пауза");
+            client.options.forwardKey.setPressed(false);
             client.options.jumpKey.setPressed(false);
             return;
         }
@@ -453,36 +500,64 @@ public class Modules {
                     client.options.forwardKey.setPressed(false);
                     client.options.jumpKey.setPressed(false);
                 }
-                return; 
+                return;
             }
         }
 
-        if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
-            updateState("Сканирую руду");
-            targetBlock = findNearestOre(client, player);
+        // Чистим vein-очередь
+        long now = System.currentTimeMillis();
+        veinBlocks.entrySet().removeIf(e ->
+            client.world.getBlockState(e.getKey()).isAir()
+            || now - e.getValue() > 60_000L
+            || blacklistedBlocks.containsKey(e.getKey()));
+
+        // Если есть незаконченная жила — она в приоритете
+        if (!veinBlocks.isEmpty()) {
+            BlockPos bestVein = null;
+            double bestVDist = 30.0;
+            for (BlockPos vb : veinBlocks.keySet()) {
+                double d = player.getPos().distanceTo(Vec3d.ofCenter(vb));
+                if (d < bestVDist) { bestVDist = d; bestVein = vb; }
+            }
+            if (bestVein != null) {
+                targetBlock = bestVein;
+                targetTimer = 0;
+            }
+        }
+
+        // Выбор цели: умный режим или по индексу
+        if (targetBlock == null
+            || client.world.getBlockState(targetBlock).isAir()
+            || blacklistedBlocks.containsKey(targetBlock)) {
+            updateState(smartOreSelection ? "Умный скан руд..." : "Сканирую руду");
+            targetBlock = smartOreSelection
+                ? findBestOre(client, player)
+                : findNearestOre(client, player);
             targetTimer = 0;
         }
 
         if (targetBlock != null) {
             targetTimer++;
-            if (targetTimer > 600) { 
+            if (targetTimer > 600) {
                 blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                 targetBlock = null;
+                veinBlocks.clear();
                 return;
             }
 
-            Vec3d eyePos = player.getEyePos();
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
             if (dist <= 4.0) {
-                updateState("Добываю " + oreNames[targetOreIndex]);
+                updateState("Добываю " + blockName(client.world.getBlockState(targetBlock).getBlock()));
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
-                
+
                 if (client.world.getBlockState(targetBlock).isAir()) {
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                    if (smartOreSelection) addVeinBlocks(client, targetBlock);
+                    veinBlocks.remove(targetBlock);
                     targetBlock = null;
                     actionDelay = 3 + random.nextInt(5);
                 } else {
@@ -492,7 +567,7 @@ public class Modules {
             }
 
             int dy = targetBlock.getY() - player.getBlockPos().getY();
-            
+
             if (dy >= 2) {
                 updateState("Ступенька ВВЕРХ");
                 BlockPos upFront = player.getBlockPos().offset(player.getHorizontalFacing()).up();
@@ -503,7 +578,7 @@ public class Modules {
                 }
                 return;
             }
-            
+
             if (dy <= -2) {
                 updateState("Ступенька ВНИЗ");
                 BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
@@ -530,7 +605,7 @@ public class Modules {
                 updateState("Копаю путь");
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
-                
+
                 BlockPos breakTarget = !client.world.getBlockState(front).isAir() ? front : frontUp;
                 lookAt(player, breakTarget);
                 breakBlock(client, player, breakTarget);
@@ -551,7 +626,7 @@ public class Modules {
         BlockPos tunnelFrontUp = tunnelFront.up();
 
         if (client.world.getBlockState(tunnelFront.down()).getBlock() == Blocks.LAVA) {
-            player.setYaw(player.getYaw() + 90.0f); 
+            player.setYaw(player.getYaw() + 90.0f);
             return;
         }
 
@@ -566,6 +641,81 @@ public class Modules {
         }
     }
 
+    // Вспомогательные методы умного AutoMine
+    private int orePriority(Block b) {
+        return ORE_PRIORITY.getOrDefault(b, 0);
+    }
+
+    private BlockPos findBestOre(MinecraftClient client, ClientPlayerEntity player) {
+        BlockPos pPos = player.getBlockPos();
+        BlockPos best = null;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (int x = -15; x <= 15; x++) {
+            for (int y = -10; y <= 10; y++) {
+                for (int z = -15; z <= 15; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    if (blacklistedBlocks.containsKey(pos)) continue;
+
+                    Block b = client.world.getBlockState(pos).getBlock();
+                    int prio = orePriority(b);
+                    if (prio <= 0 || prio < minOrePriority) continue;
+
+                    double dist = player.getPos().distanceTo(Vec3d.ofCenter(pos));
+                    if (dist > 25.0) continue;
+
+                    int score = prio * 10 - (int) (dist * 3);
+                    if (isOreExposed(client, pos)) score += 15;
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = pos;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean isOreExposed(MinecraftClient client, BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            if (client.world.getBlockState(pos.offset(dir)).isAir()) return true;
+        }
+        return false;
+    }
+
+    private void addVeinBlocks(MinecraftClient client, BlockPos center) {
+        Block origin = client.world.getBlockState(center).getBlock();
+        int prio = orePriority(origin);
+        if (prio < 45) return;
+
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    BlockPos n = center.add(dx, dy, dz);
+                    if (client.world.getBlockState(n).getBlock() != origin) continue;
+                    if (blacklistedBlocks.containsKey(n)) continue;
+                    veinBlocks.putIfAbsent(n, System.currentTimeMillis());
+                }
+            }
+        }
+    }
+
+    private String blockName(Block b) {
+        if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) return "алмаз";
+        if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) return "изумруд";
+        if (b == Blocks.ANCIENT_DEBRIS) return "древние обломки";
+        if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE || b == Blocks.NETHER_GOLD_ORE) return "золото";
+        if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) return "железо";
+        if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) return "лазурит";
+        if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) return "редстоун";
+        if (b == Blocks.COPPER_ORE || b == Blocks.DEEPSLATE_COPPER_ORE) return "медь";
+        if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) return "уголь";
+        if (b == Blocks.NETHER_QUARTZ_ORE) return "кварц";
+        return "блок";
+    }
+
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         Block b = client.world.getBlockState(pos).getBlock();
         if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
@@ -575,11 +725,11 @@ public class Modules {
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            if (breakStuckTicks > 100) { 
+            if (breakStuckTicks > 100) {
                 updateState("Приват! Разворот");
-                blacklistedBlocks.put(pos, System.currentTimeMillis()); 
-                if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); 
-                triggerRetreat(); 
+                blacklistedBlocks.put(pos, System.currentTimeMillis());
+                if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                triggerRetreat();
                 return;
             }
         } else {
@@ -591,10 +741,11 @@ public class Modules {
         player.swingHand(Hand.MAIN_HAND);
     }
 
+    // Старый поиск по индексу (для режима smartOreSelection = false)
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 25.0; 
+        double bestDist = 25.0;
 
         Block t1 = switch (targetOreIndex) {
             case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
@@ -621,7 +772,7 @@ public class Modules {
     }
 
     private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
-        return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(5.0), 
+        return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(5.0),
             e -> e.isAlive() && !e.getStack().isEmpty())
             .stream()
             .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
@@ -632,7 +783,7 @@ public class Modules {
         if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
         if (attackCooldown > 0) return;
 
-        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
+        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8),
             e -> e != player && e.isAlive() && !(e instanceof ArmorStandEntity))
             .stream()
             .sorted(Comparator.comparing((LivingEntity e) -> !(e instanceof PlayerEntity))
@@ -648,7 +799,7 @@ public class Modules {
             Vec3d eye = player.getEyePos();
             Vec3d targetPos = target.getEyePos();
             BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            
+
             if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
                 if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
                     for (int i = 0; i < 9; i++) {
@@ -662,8 +813,8 @@ public class Modules {
                 if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
                     client.interactionManager.attackEntity(player, target);
                     player.swingHand(Hand.MAIN_HAND);
-                    attackCooldown = 6 + random.nextInt(4); 
-                    
+                    attackCooldown = 6 + random.nextInt(4);
+
                     float damage = 5.0f;
                     if (damageNumbers) damageNumbersList.add(new DamageNumber(target.getPos(), damage, false));
                     if (hitCounter) currentHitCount++;
@@ -708,7 +859,7 @@ public class Modules {
                     EquipmentSlot slot = equip.slot();
                     ItemStack current = player.getEquippedStack(slot);
                     if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
-                        int slotId = i < 9 ? i + 36 : i; 
+                        int slotId = i < 9 ? i + 36 : i;
                         client.interactionManager.clickSlot(player.playerScreenHandler.syncId, slotId, 0, SlotActionType.QUICK_MOVE, player);
                         return;
                     }
@@ -762,7 +913,7 @@ public class Modules {
         if (hook == null && fishTimer <= 0) {
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             player.swingHand(Hand.MAIN_HAND);
-            fishTimer = 20; 
+            fishTimer = 20;
         } else if (hook != null && hook.getVelocity().y < -0.08) {
             if (fishTimer <= 0) {
                 client.interactionManager.interactItem(player, Hand.MAIN_HAND);
@@ -790,17 +941,17 @@ public class Modules {
                 for (BlockPos pos : xrayBlocks) {
                     Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
                     float r = 1.0f, g = 1.0f, bl = 1.0f;
-                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) { r = 0.0f; g = 1.0f; bl = 1.0f; } 
-                    else if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) { r = 0.0f; g = 1.0f; bl = 0.0f; } 
-                    else if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE) { r = 1.0f; g = 1.0f; bl = 0.0f; } 
-                    else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; } 
-                    else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; } 
-                    else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; } 
+                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) { r = 0.0f; g = 1.0f; bl = 1.0f; }
+                    else if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) { r = 0.0f; g = 1.0f; bl = 0.0f; }
+                    else if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE) { r = 1.0f; g = 1.0f; bl = 0.0f; }
+                    else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; }
+                    else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; }
+                    else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; }
                     else if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) { r = 0.2f; g = 0.2f; bl = 0.2f; }
-                    
+
                     Box box = new Box(pos).expand(0.002);
                     drawFullBox(matrices, lines, box, r, g, bl, 1.0f);
-                    
+
                     if (tracers) {
                         Vec3d targetVec = Vec3d.ofCenter(pos);
                         lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(r, g, bl, 1.0f).normal(0, 1, 0);
@@ -812,7 +963,7 @@ public class Modules {
             if (holeESP) {
                 for (BlockPos pos : holeBlocks) {
                     Box box = new Box(pos).expand(0.002);
-                    drawFullBox(matrices, lines, box, 0.0f, 1.0f, 0.5f, 1.0f); // Зеленый для безопасных дырок
+                    drawFullBox(matrices, lines, box, 0.0f, 1.0f, 0.5f, 1.0f);
                 }
             }
 
@@ -872,24 +1023,24 @@ public class Modules {
                     Vec3d start = player.getEyePos();
                     float pitch = player.getPitch();
                     float yaw = player.getYaw();
-                    float vel = 3.0f; 
-                    
+                    float vel = 3.0f;
+
                     Vec3d dir = new Vec3d(
                         -MathHelper.sin(yaw * (float)Math.PI / 180.0f) * MathHelper.cos(pitch * (float)Math.PI / 180.0f),
                         -MathHelper.sin(pitch * (float)Math.PI / 180.0f),
                         MathHelper.cos(yaw * (float)Math.PI / 180.0f) * MathHelper.cos(pitch * (float)Math.PI / 180.0f)
                     );
-                    
+
                     Vec3d pos = start;
                     Vec3d velVec = dir.multiply(vel);
-                    
+
                     for (int i = 0; i < 100; i++) {
                         Vec3d nextPos = pos.add(velVec);
                         lines.vertex(matrices.peek().getPositionMatrix(), (float)pos.x, (float)pos.y, (float)pos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
                         lines.vertex(matrices.peek().getPositionMatrix(), (float)nextPos.x, (float)nextPos.y, (float)nextPos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
                         pos = nextPos;
-                        velVec = velVec.multiply(0.99).add(0, -0.05, 0); 
-                        
+                        velVec = velVec.multiply(0.99).add(0, -0.05, 0);
+
                         if (MinecraftClient.getInstance().world.getBlockState(BlockPos.ofFloored(pos)).isSolid()) break;
                     }
                 }
@@ -928,26 +1079,26 @@ public class Modules {
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        
+
         float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed));
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, Entity entity) {
         Vec3d target = entity.getPos();
-        double dx = target.x - player.getX(); 
-        double dy = target.y + entity.getHeight() / 2 - player.getEyeY(); 
+        double dx = target.x - player.getX();
+        double dy = target.y + entity.getHeight() / 2 - player.getEyeY();
         double dz = target.z - player.getZ();
         double dist = Math.sqrt(dx * dx + dz * dz);
         float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
-        
+
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        
+
         float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed));
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 
