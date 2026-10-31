@@ -10,6 +10,9 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 import java.text.SimpleDateFormat;
@@ -88,9 +91,18 @@ public class SmartClient implements ClientModInitializer {
             long uptime = (System.currentTimeMillis() - startTime) / 1000;
             String timeStr = String.format("%02d:%02d", uptime / 60, uptime % 60);
             
+            // Водяной знак
             String watermark = "§l§bPULSE §fVISUALS §7| §b" + fps + " FPS §7| §e" + timeStr;
             context.drawTextWithShadow(client.textRenderer, watermark, 5, 5, 0xFFFFFF);
 
+            // Low HP (Красная пульсация)
+            if (modules.lowHp && client.player.getHealth() < 6.0f) {
+                float pulse = (float) (Math.sin(System.currentTimeMillis() / 200.0) * 0.5 + 0.5);
+                int alpha = (int) (pulse * 100);
+                context.fill(0, 0, client.getWindow().getScaledWidth(), client.getWindow().getScaledHeight(), (alpha << 24) | 0xFF0000);
+            }
+
+            // Собираем включенные модули
             List<String> activeModules = new ArrayList<>();
             if (modules.autoMine) activeModules.add("AutoMine");
             if (modules.killAura) activeModules.add("KillAura");
@@ -114,6 +126,7 @@ public class SmartClient implements ClientModInitializer {
             int y = 20;
             long currentTime = System.currentTimeMillis();
 
+            // Анимированный ArrayList
             for (String mod : activeModules) {
                 if (!moduleActivationTime.containsKey(mod)) moduleActivationTime.put(mod, currentTime);
                 long timeEnabled = currentTime - moduleActivationTime.get(mod);
@@ -131,20 +144,52 @@ public class SmartClient implements ClientModInitializer {
             }
             moduleActivationTime.keySet().removeIf(key -> !activeModules.contains(key));
 
+            // Красивый TargetHUD (Pulse Style)
             if (modules.killAuraTarget != null && modules.killAuraTarget.isAlive()) {
                 LivingEntity target = modules.killAuraTarget;
                 int cx = client.getWindow().getScaledWidth() / 2;
                 int cy = client.getWindow().getScaledHeight() / 2 + 40;
                 String name = target.getName().getString();
                 float healthPercent = Math.max(0, target.getHealth() / target.getMaxHealth());
+                float armor = target.getArmor();
+                double distance = client.player.distanceTo(target);
 
-                context.fill(cx - 65, cy, cx + 65, cy + 30, 0xAA000000);
-                context.drawBorder(cx - 65, cy, 130, 30, 0xFF00FFFF);
+                // Рамка
+                context.fill(cx - 75, cy, cx + 75, cy + 45, 0xAA000000);
+                context.drawBorder(cx - 75, cy, 150, 45, 0xFF00FFFF);
 
-                context.drawCenteredTextWithShadow(client.textRenderer, name, cx, cy + 4, 0xFFFFFF);
+                // Имя и Дистанция
+                context.drawTextWithShadow(client.textRenderer, name, cx - 70, cy + 4, 0xFFFFFFFF);
+                context.drawTextWithShadow(client.textRenderer, String.format("%.1f", distance) + "m", cx + 40, cy + 4, 0xFFAAAAAA);
+
+                // Полоска здоровья
+                context.fill(cx - 70, cy + 18, cx + 70, cy + 24, 0xFF222222);
+                context.fillGradient(cx - 70, cy + 18, (int)(cx - 70 + (140 * healthPercent)), cy + 24, 0xFF00FF00, 0xFF00AA00);
                 
-                context.fill(cx - 60, cy + 18, cx + 60, cy + 24, 0xFF222222);
-                context.fillGradient(cx - 60, cy + 18, (int)(cx - 60 + (120 * healthPercent)), cy + 24, 0xFF00FF00, 0xFF00AA00);
+                // Броня
+                context.drawTextWithShadow(client.textRenderer, "🛡 " + (int)armor, cx - 70, cy + 30, 0xFFAAAAAA);
+            }
+
+            // Damage Numbers (Числа урона)
+            if (modules.damageNumbers) {
+                for (Modules.DamageNumber dn : modules.damageNumbersList) {
+                    float alpha = 1.0f - (float)(currentTime - dn.spawnTime) / 1000.0f;
+                    if (alpha <= 0) continue;
+                    int a = (int)(alpha * 255) << 24;
+                    int color = dn.isCrit ? (a | 0xFF0000) : (a | 0xFFAA00); // Красный для крита, золотой для обычного
+                    
+                    // Проецирование 3D координат в 2D (упрощенно)
+                    Vec3d pos = dn.pos;
+                    int x = (int)(cx + (pos.x - client.player.getX()) * 50);
+                    int yDmg = (int)(cy + (pos.y - client.player.getY()) * 50);
+                    
+                    context.drawCenteredTextWithShadow(client.textRenderer, String.valueOf((int)dn.damage), x, yDmg, color);
+                }
+            }
+
+            // Hit Counter (Счетчик серии)
+            if (modules.hitCounter && modules.currentHitCount > 0) {
+                context.drawCenteredTextWithShadow(client.textRenderer, "§l§cHIT: " + modules.currentHitCount, cx, cy - 80, 0xFFFFFFFF);
             }
         });
 
