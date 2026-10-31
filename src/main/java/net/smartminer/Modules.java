@@ -69,7 +69,7 @@ public class Modules {
             }
         }
 
-        // Умная еда и броня
+        // Умная еда
         if (player.getHungerManager().getFoodLevel() < 15 && !player.getMainHandStack().isEmpty() && player.getMainHandStack().contains(DataComponentTypes.FOOD)) {
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             player.swingHand(Hand.MAIN_HAND);
@@ -181,17 +181,20 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); // Рамка вокруг руды
-
-            // Tracers (Линия от игрока к руде)
-            Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
-            Vec3d targetVec = Vec3d.ofCenter(targetBlock);
-            Matrix4f matrix = matrices.peek().getPositionMatrix();
             
-            // Рисуем линию (красную)
-            VertexRendering.drawLine(matrices, lines, (float)eye.x, (float)eye.y, (float)eye.z, 
-                                     (float)targetVec.x, (float)targetVec.y, (float)targetVec.z, 
-                                     1.0f, 0.0f, 0.0f, 1.0f);
+            // Рисуем голубую рамку вокруг руды
+            VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); 
+
+            // Tracers (Линия от глаз к руде)
+            if (MinecraftClient.getInstance().player != null) {
+                Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
+                Vec3d targetVec = Vec3d.ofCenter(targetBlock);
+                Matrix4f matrix = matrices.peek().getPositionMatrix();
+                
+                // Правильная отрисовка линии для 1.21.4
+                lines.vertex(matrix, (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
+                lines.vertex(matrix, (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
+            }
         }
         matrices.pop();
     }
@@ -216,6 +219,17 @@ public class Modules {
 
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (attackCooldown > 0) return;
+        
+        // Auto-Tool (Ищем меч или топор)
+        if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
+            for (int i = 0; i < 9; i++) {
+                if (player.getInventory().getStack(i).getItem() instanceof SwordItem || player.getInventory().getStack(i).getItem() instanceof AxeItem) {
+                    player.getInventory().selectedSlot = i;
+                    return;
+                }
+            }
+        }
+
         for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
             if (entity instanceof MobEntity && entity.isAlive() && player.distanceTo(entity) < 3.8) {
                 lookAtEntity(player, entity);
