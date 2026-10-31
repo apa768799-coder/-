@@ -21,8 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 public class SmartClient implements ClientModInitializer {
-    // Бинды
-    public static KeyBinding guiKey, mineKey, fishKey, afkKey, auraKey, totemKey, xrayKey, espKey, brightKey, tracerKey, glowKey;
+    public static KeyBinding guiKey, mineKey, fishKey, afkKey, auraKey, totemKey, xrayKey, espKey, brightKey, tracerKey, glowKey, criticalsKey, trajectoryKey, damageKey;
     public static Modules modules = new Modules();
     
     public static List<String> logs = new ArrayList<>();
@@ -39,10 +38,8 @@ public class SmartClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Автозагрузка конфига при запуске игры
         ConfigManager.loadConfig(modules);
 
-        // Регистрация клавиш (Биндов)
         guiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.gui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.smartclient"));
         mineKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.mine", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_R, "category.smartclient"));
         fishKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.fish", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F, "category.smartclient"));
@@ -54,8 +51,10 @@ public class SmartClient implements ClientModInitializer {
         brightKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.bright", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "category.smartclient"));
         tracerKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.tracer", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_L, "category.smartclient"));
         glowKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.glow", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_G, "category.smartclient"));
+        criticalsKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.criticals", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, "category.smartclient"));
+        trajectoryKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.trajectory", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_H, "category.smartclient"));
+        damageKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartclient.damage", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_N, "category.smartclient"));
 
-        // Обработка нажатий и тиков игры
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (guiKey.wasPressed()) { if (client.currentScreen == null) client.setScreen(new ClickGui()); }
             while (mineKey.wasPressed()) { modules.autoMine = !modules.autoMine; msg(client, "AutoMine", modules.autoMine); }
@@ -68,18 +67,19 @@ public class SmartClient implements ClientModInitializer {
             while (brightKey.wasPressed()) { modules.fullBright = !modules.fullBright; msg(client, "FullBright", modules.fullBright); }
             while (tracerKey.wasPressed()) { modules.tracers = !modules.tracers; msg(client, "Tracers", modules.tracers); }
             while (glowKey.wasPressed()) { modules.glowESP = !modules.glowESP; msg(client, "GlowESP", modules.glowESP); }
+            while (criticalsKey.wasPressed()) { modules.criticals = !modules.criticals; msg(client, "Criticals", modules.criticals); }
+            while (trajectoryKey.wasPressed()) { modules.trajectory = !modules.trajectory; msg(client, "Trajectory", modules.trajectory); }
+            while (damageKey.wasPressed()) { modules.damageNumbers = !modules.damageNumbers; msg(client, "DamageNumbers", modules.damageNumbers); }
 
             if (client.player != null && client.world != null && client.interactionManager != null) {
                 modules.onTick(client);
             }
         });
 
-        // Рендер визуалов (ESP, Tracers)
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
             if (MinecraftClient.getInstance().world != null) modules.renderESP(context);
         });
 
-        // Отрисовка HUD (Водяной знак, список модулей, TargetHUD)
         HudRenderCallback.EVENT.register((context, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
@@ -88,11 +88,9 @@ public class SmartClient implements ClientModInitializer {
             long uptime = (System.currentTimeMillis() - startTime) / 1000;
             String timeStr = String.format("%02d:%02d", uptime / 60, uptime % 60);
             
-            // Watermark
-            String watermark = "§l§bSMART §fCLIENT §7| §b" + fps + " FPS §7| §e" + timeStr;
+            String watermark = "§l§bPULSE §fVISUALS §7| §b" + fps + " FPS §7| §e" + timeStr;
             context.drawTextWithShadow(client.textRenderer, watermark, 5, 5, 0xFFFFFF);
 
-            // Собираем включенные модули
             List<String> activeModules = new ArrayList<>();
             if (modules.autoMine) activeModules.add("AutoMine");
             if (modules.killAura) activeModules.add("KillAura");
@@ -106,6 +104,9 @@ public class SmartClient implements ClientModInitializer {
             if (modules.chestESP) activeModules.add("ChestESP");
             if (modules.tracers) activeModules.add("Tracers");
             if (modules.glowESP) activeModules.add("GlowESP");
+            if (modules.criticals) activeModules.add("Criticals");
+            if (modules.trajectory) activeModules.add("Trajectory");
+            if (modules.damageNumbers) activeModules.add("DamageNumbers");
 
             activeModules.sort(Comparator.comparingInt(String::length).reversed());
 
@@ -113,7 +114,6 @@ public class SmartClient implements ClientModInitializer {
             int y = 20;
             long currentTime = System.currentTimeMillis();
 
-            // Анимированный ArrayList (Список модулей)
             for (String mod : activeModules) {
                 if (!moduleActivationTime.containsKey(mod)) moduleActivationTime.put(mod, currentTime);
                 long timeEnabled = currentTime - moduleActivationTime.get(mod);
@@ -131,7 +131,6 @@ public class SmartClient implements ClientModInitializer {
             }
             moduleActivationTime.keySet().removeIf(key -> !activeModules.contains(key));
 
-            // Красивый TargetHUD
             if (modules.killAuraTarget != null && modules.killAuraTarget.isAlive()) {
                 LivingEntity target = modules.killAuraTarget;
                 int cx = client.getWindow().getScaledWidth() / 2;
@@ -149,7 +148,6 @@ public class SmartClient implements ClientModInitializer {
             }
         });
 
-        // Анти-приват через чат
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> checkChat(message.getString()));
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> checkChat(message.getString()));
     }
@@ -165,6 +163,6 @@ public class SmartClient implements ClientModInitializer {
 
     private void msg(MinecraftClient client, String name, boolean state) {
         addLog(name + ": " + (state ? "ON" : "OFF"));
-        if (client.player != null) client.player.sendMessage(net.minecraft.text.Text.literal("§b[Smart] " + name + ": " + (state ? "§aON" : "§cOFF")), true);
+        if (client.player != null) client.player.sendMessage(net.minecraft.text.Text.literal("§b[Pulse] " + name + ": " + (state ? "§aON" : "§cOFF")), true);
     }
 }
