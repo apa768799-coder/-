@@ -28,7 +28,7 @@ public class SmartClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        addLog("Загрузка клиента " + MOD_NAME + "...");
+        addLog("Загрузка клиента...");
 
         // ==========================================
         // 1. РЕГИСТРАЦИЯ КЛАВИШ
@@ -56,9 +56,8 @@ public class SmartClient implements ClientModInitializer {
 
             // Открытие GUI
             while (keyGui.wasPressed()) {
-                // Если у тебя есть свой класс ClickGui, раскомментируй и используй его:
-                // client.setScreen(new ClickGui());
-                client.player.sendMessage(Text.literal(MOD_NAME + "§eМеню (заглушка). Модули переключаются клавишами."), false);
+                // Открываем наше красивое меню!
+                MinecraftClient.getInstance().setScreen(new ClickGui());
             }
 
             // Переключение модулей
@@ -125,18 +124,14 @@ public class SmartClient implements ClientModInitializer {
 
     /**
      * Вывод логов в чат и консоль.
-     * Используется в Modules.java для отображения текущего состояния (например, "Добываю алмаз").
      */
     public static void addLog(String message) {
-        // Вывод в консоль (для отладки)
         System.out.println("[SmartMiner] " + message);
 
-        // Вывод в чат игроку (если он в игре)
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
-            // Чтобы не спамило слишком сильно, можно фильтровать сообщения
             Text text = Text.literal(MOD_NAME + message).formatted(Formatting.GRAY);
-            client.player.sendMessage(text, true); // true = сообщение над хотбаром (action bar)
+            client.player.sendMessage(text, false);
         }
     }
 }
