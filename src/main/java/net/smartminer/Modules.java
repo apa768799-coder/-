@@ -94,15 +94,13 @@ public class Modules {
     private Random random = new Random();
     private String lastLoggedState = "";
 
-    // ================== МЕТОД ДЛЯ X-RAY (КОТОРЫЙ ИСКАЛ КОМПИЛЯТОР) ==================
+    // НОВАЯ ПЕРЕМЕННАЯ ДЛЯ ТАЙМЕРА ЛУТА
+    private int targetItemTimer = 0;
+
     public boolean isXrayBlock(BlockState state) {
         Block b = state.getBlock();
-        
-        // Воздух, вода, лава и сундуки всегда видимы
         if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA) return true;
         if (b == Blocks.CHEST || b == Blocks.ENDER_CHEST || b == Blocks.TRAPPED_CHEST) return true;
-        
-        // Проверяем выбранные руды
         if (xrayDiamond && (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE)) return true;
         if (xrayIron && (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE)) return true;
         if (xrayGold && (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE)) return true;
@@ -110,8 +108,7 @@ public class Modules {
         if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) return true;
         if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) return true;
         if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) return true;
-
-        return false; // Всё остальное (камень, земля) будет невидимым
+        return false; 
     }
 
     private void updateState(String newState) {
@@ -186,39 +183,29 @@ public class Modules {
 
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
         if (player.isOnGround() || player.isTouchingWater() || player.isInLava()) return;
-
         BlockPos below = player.getBlockPos().down();
-        
         if (client.world.getBlockState(below).isAir() || client.world.getBlockState(below).getBlock() == Blocks.LAVA) {
             for (int i = 0; i < 9; i++) {
                 ItemStack stack = player.getInventory().getStack(i);
                 if (stack.getItem() instanceof BlockItem) {
                     if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
-                    
                     BlockPos neighbor = below.offset(player.getHorizontalFacing().getOpposite());
-                    
                     if (!client.world.getBlockState(neighbor).isAir() && client.world.getBlockState(neighbor).getBlock() != Blocks.LAVA) {
                         client.options.sneakKey.setPressed(true);
-                        
                         float prevYaw = player.getYaw();
                         float prevPitch = player.getPitch();
-                        
                         Vec3d hitVec = Vec3d.ofCenter(neighbor).add(0, 0.5, 0);
                         double dx = hitVec.x - player.getX();
                         double dy = hitVec.y - player.getEyeY();
                         double dz = hitVec.z - player.getZ();
                         double dist = Math.sqrt(dx*dx + dz*dz);
-                        
                         float targetYaw = (float)(Math.toDegrees(Math.atan2(dz, dx)) - 90.0f);
                         float targetPitch = (float)-Math.toDegrees(Math.atan2(dy, dist));
-                        
                         player.setYaw(targetYaw);
                         player.setPitch(targetPitch);
-                        
                         BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, neighbor, false);
                         client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
                         player.swingHand(Hand.MAIN_HAND);
-                        
                         player.setYaw(prevYaw);
                         player.setPitch(prevPitch);
                         return;
@@ -226,9 +213,7 @@ public class Modules {
                 }
             }
         } else {
-            if (client.options.sneakKey.isPressed()) {
-                client.options.sneakKey.setPressed(false);
-            }
+            if (client.options.sneakKey.isPressed()) client.options.sneakKey.setPressed(false);
         }
     }
 
@@ -261,17 +246,23 @@ public class Modules {
             }
         }
 
+        // ================== СБОР ЛУТА С ТАЙМЕРОМ ==================
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
+            targetItemTimer = 0; // Сбрасываем таймер при новом предмете
         }
 
         if (targetItem != null) {
-            BlockHitResult hit = client.world.raycast(new RaycastContext(player.getEyePos(), targetItem.getPos(), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            if (hit.getType() != HitResult.Type.MISS && !hit.getBlockPos().equals(targetItem.getBlockPos())) {
-                targetItem = null;
+            targetItemTimer++;
+            double dist = player.getPos().distanceTo(targetItem.getPos());
+
+            // Если мы пытаемся подобрать предмет дольше 2 секунд (40 тиков) или подошли вплотную, а он не берется
+            if (targetItemTimer > 40 || (dist < 1.5 && targetItemTimer > 15)) {
+                SmartClient.addLog("Не могу подобрать предмет, бросаю");
+                targetItem = null; // Забываем про этот предмет
+                targetItemTimer = 0;
             } else {
                 updateState("Сбор лута");
-                double dist = player.getPos().distanceTo(targetItem.getPos());
                 if (dist > 1.2) {
                     lookAtEntity(player, targetItem);
                     client.options.forwardKey.setPressed(true);
@@ -284,6 +275,7 @@ public class Modules {
             }
         }
 
+        // ================== ПОИСК И КОПАНИЕ РУДЫ ==================
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
