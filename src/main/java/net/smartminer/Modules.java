@@ -11,6 +11,9 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
@@ -29,7 +32,6 @@ import org.joml.Matrix4f;
 import java.util.Comparator;
 
 public class Modules {
-    // ВОТ ЭТИ ПЕРЕМЕННЫЕ ОТСУТСТВОВАЛИ
     public boolean autoMine = false;
     public boolean autoFish = false;
     public boolean killAura = false;
@@ -90,15 +92,22 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
+    // ================== ИСПРАВЛЕННЫЙ AUTO ARMOR 2.0 ==================
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            if (stack.getItem() instanceof ArmorItem armor) {
-                int armorSlot = armor.getSlotType().getEntitySlotId() + 5;
-                ItemStack current = player.getInventory().getStack(armorSlot - 5);
-                if (current.isEmpty() || (current.getItem() instanceof ArmorItem curArmor && armor.getProtection() > curArmor.getProtection())) {
-                    client.interactionManager.clickSlot(player.playerScreenHandler.syncId, i, 0, SlotActionType.QUICK_MOVE, player);
-                    return;
+            if (stack.contains(DataComponentTypes.EQUIPPABLE)) {
+                EquippableComponent equip = stack.get(DataComponentTypes.EQUIPPABLE);
+                if (equip != null && equip.slot().getType() == EquipmentSlot.Type.HUMANOID_ARMOR) {
+                    EquipmentSlot slot = equip.slot();
+                    ItemStack current = player.getEquippedStack(slot);
+                    
+                    // Если слот пуст или новая броня имеет большую прочность (лучший тир)
+                    if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
+                        int slotId = i < 9 ? i + 36 : i; 
+                        client.interactionManager.clickSlot(player.playerScreenHandler.syncId, slotId, 0, SlotActionType.QUICK_MOVE, player);
+                        return;
+                    }
                 }
             }
         }
