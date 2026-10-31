@@ -19,7 +19,6 @@ public class ClickGui extends Screen {
     private int dragX = 0, dragY = 0;
     private boolean isDragging = false;
 
-    // Позиция меню по умолчанию (по центру)
     private int menuX = -1, menuY = -1;
 
     public ClickGui() {
@@ -50,7 +49,6 @@ public class ClickGui extends Screen {
         context.fill(x1, y1, x1 + catWidth, y2, COLOR_SIDEBAR); 
         context.fill(x1 + catWidth, y1, x1 + catWidth + 1, y2, 0xFF000000);
 
-        // Шапка (за нее можно тянуть)
         context.fill(x1, y1, x2, y1 + 20, 0xFF1A1A1A);
         context.drawText(this.textRenderer, "§lSMART §fCLIENT §7v25", x1 + 10, y1 + 6, COLOR_TEXT, false);
 
@@ -64,12 +62,12 @@ public class ClickGui extends Screen {
         int modStartY = startY + 30;
         int x2Pos = x2;
 
-        if (currentTab == 0) { // COMBAT
+        if (currentTab == 0) { 
             context.drawText(this.textRenderer, "§l§fБОЙ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "KillAura", SmartClient.modules.killAura, startX, modStartY, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 1) { // MOVEMENT
+        else if (currentTab == 1) { 
             context.drawText(this.textRenderer, "§l§fДВИЖЕНИЕ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "AutoMine", SmartClient.modules.autoMine, startX, modStartY, x2Pos, mouseX, mouseY);
@@ -84,12 +82,12 @@ public class ClickGui extends Screen {
             drawModule(context, "AutoFish", SmartClient.modules.autoFish, startX, modStartY + 60, x2Pos, mouseX, mouseY);
             drawModule(context, "Scaffold", SmartClient.modules.scaffold, startX, modStartY + 90, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 2) { // RENDER
+        else if (currentTab == 2) { 
             context.drawText(this.textRenderer, "§l§fВИЗУАЛЫ", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "FullBright", SmartClient.modules.fullBright, startX, modStartY, x2Pos, mouseX, mouseY);
         } 
-        else if (currentTab == 3) { // PLAYER
+        else if (currentTab == 3) { 
             context.drawText(this.textRenderer, "§l§fИГРОК", startX, startY, COLOR_TEXT, false);
             context.fill(startX, startY + 12, x2 - 20, startY + 13, 0xFF000000);
             drawModule(context, "Anti-AFK", SmartClient.modules.antiAfk, startX, modStartY, x2Pos, mouseX, mouseY);
@@ -132,7 +130,6 @@ public class ClickGui extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
-            // Логика перетаскивания за шапку (высота шапки 20 пикселей)
             if (isHovered(mouseX, mouseY, menuX, menuY, 400, 20)) {
                 isDragging = true;
                 dragX = (int) (mouseX - menuX);
