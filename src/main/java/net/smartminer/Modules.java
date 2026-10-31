@@ -54,32 +54,37 @@ public class Modules {
     public BlockPos targetChest = null;
     private ItemEntity targetItem = null;
 
-    private int breakCooldown = 0;
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
     private int escapeTicks = 0;
     
-    // Анти-приват и Анти-залипание
+    // Анти-залипание и Черный список
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
-    
-    // ЧЕРНЫЙ СПИСОК БЛОКОВ (чтобы не бить в один и тот же)
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
 
     private Random random = new Random();
+    private String lastLoggedState = "";
+
+    private void updateState(String newState) {
+        this.currentState = newState;
+        if (!newState.equals(lastLoggedState)) {
+            SmartClient.addLog(newState);
+            lastLoggedState = newState;
+        }
+    }
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
         if (player == null) return;
 
-        if (breakCooldown > 0) breakCooldown--;
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
-        // Очищаем черный список от старых записей (старше 5 секунд)
+        // Очищаем черный список раз в 15 секунд
         long currentTime = System.currentTimeMillis();
-        blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 5000);
+        blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 15000);
 
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
@@ -107,7 +112,6 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
-    // ================== УМНЫЙ AUTOMINE С АНТИ-ПРИВАТОМ И BLACKLIST ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -125,10 +129,12 @@ public class Modules {
             }
         }
 
-        // Если цель исчезла или попала в черный список - ищем новую
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
-            currentState = "Поиск руды";
+            updateState("Поиск руды");
             targetBlock = findNearestOre(client, player);
+            if (targetBlock != null) {
+                SmartClient.addLog("Найдена руда: " + oreNames[targetOreIndex] + " на " + targetBlock.toShortString());
+            }
         }
 
         if (targetBlock != null) {
@@ -137,12 +143,11 @@ public class Modules {
             double dist = player.getPos().distanceTo(targetCenter);
 
             if (dist <= 4.5) {
-                currentState = "Добываю " + oreNames[targetOreIndex];
+                updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
                 
-                // Если мы ударили по блоку, и он стал воздухом (сломали) - в черный список
                 if (client.world.getBlockState(targetBlock).isAir()) {
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     targetBlock = null;
@@ -156,7 +161,7 @@ public class Modules {
             BlockPos hitBlock = hit.getBlockPos();
 
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
-                currentState = "Копаю стену";
+                updateState("Копаю стену к руде");
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, hitBlock); 
@@ -164,7 +169,7 @@ public class Modules {
                 return;
             }
 
-            currentState = "Иду к руде";
+            updateState("Иду к руде");
             lookAt(player, targetBlock);
             client.options.forwardKey.setPressed(true);
 
@@ -181,12 +186,14 @@ public class Modules {
             return;
         }
 
-        // Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
+            if (targetItem != null) {
+                SmartClient.addLog("Найден дроп: " + targetItem.getStack().getName().getString());
+            }
         }
         if (targetItem != null) {
-            currentState = "Сбор лута";
+            updateState("Сбор лута");
             double dist = player.getPos().distanceTo(targetItem.getPos());
             if (dist > 1.2) {
                 lookAtEntity(player, targetItem);
@@ -198,8 +205,7 @@ public class Modules {
             return;
         }
 
-        // Авто-туннель
-        currentState = "Копаю туннель";
+        updateState("Копаю туннель");
         lookAt(player, player.getBlockPos().offset(player.getHorizontalFacing(), 2));
         client.options.forwardKey.setPressed(true);
 
@@ -208,6 +214,7 @@ public class Modules {
         
         if (client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
             player.setYaw(player.getYaw() + 90.0f); 
+            SmartClient.addLog("Впереди лава! Меняю направление.");
             return;
         }
 
@@ -228,21 +235,23 @@ public class Modules {
         }
     }
 
-    // ВЫНЕСЕННАЯ ЛОГИКА КОПАНИЯ С ЗАЩИТОЙ ОТ ПРИВАТА И GHOST BLOCKS
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         if (blacklistedBlocks.containsKey(pos)) return;
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            // Если бьем один и тот же блок больше 3 секунд (60 тиков) - значит это приват или баг
-            if (breakStuckTicks > 60) { 
-                currentState = "Приват/Баг! Ищу другое место";
-                blacklistedBlocks.put(pos, System.currentTimeMillis()); // Заносим в черный список
+            // Если бьем больше 8 секунд (160 тиков) - это приват или бедрок
+            if (breakStuckTicks > 160) { 
+                updateState("Препятствие! Ищу другое место");
+                blacklistedBlocks.put(pos, System.currentTimeMillis()); 
+                if (targetBlock != null) {
+                    blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); // Забываем руду
+                }
                 targetBlock = null;
                 currentlyBreaking = null;
                 breakStuckTicks = 0;
-                escapeTicks = 15; 
-                player.setYaw(player.getYaw() + (float)(Math.random() * 180 - 90)); 
+                escapeTicks = 40; // Отходим 2 секунды
+                player.setYaw(player.getYaw() + 180.0f); // Разворачиваемся
                 return;
             }
         } else {
@@ -250,10 +259,12 @@ public class Modules {
             breakStuckTicks = 0;
         }
 
-        if (breakCooldown <= 0) {
-            client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
+        // Копаем каждый тик, чтобы прогресс не сбрасывался!
+        client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
+        
+        // Машем рукой для анимации
+        if (player.age % 4 == 0) {
             player.swingHand(Hand.MAIN_HAND);
-            breakCooldown = 3 + random.nextInt(3); 
         }
     }
 
@@ -273,7 +284,6 @@ public class Modules {
             for (int y = -15; y <= 15; y++) {
                 for (int z = -15; z <= 15; z++) {
                     BlockPos pos = pPos.add(x, y, z);
-                    // Пропускаем блоки из черного списка
                     if (blacklistedBlocks.containsKey(pos)) continue;
 
                     Block b = client.world.getBlockState(pos).getBlock();
