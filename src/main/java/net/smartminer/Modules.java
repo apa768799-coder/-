@@ -14,6 +14,7 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
@@ -47,6 +48,7 @@ public class Modules {
 
     public BlockPos targetBlock = null;
     public BlockPos targetChest = null;
+    private ItemEntity targetItem = null; // Цель для сбора (дроп)
 
     private int breakCooldown = 0;
     private int fishTimer = 0;
@@ -102,7 +104,6 @@ public class Modules {
                     EquipmentSlot slot = equip.slot();
                     ItemStack current = player.getEquippedStack(slot);
                     
-                    // Если слот пуст или новая броня имеет большую прочность (лучший тир)
                     if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
                         int slotId = i < 9 ? i + 36 : i; 
                         client.interactionManager.clickSlot(player.playerScreenHandler.syncId, slotId, 0, SlotActionType.QUICK_MOVE, player);
@@ -169,6 +170,7 @@ public class Modules {
         }
     }
 
+    // ================== УМНЫЙ AUTOMINE + PICKUP ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
@@ -185,6 +187,31 @@ public class Modules {
             return;
         }
 
+        // 1. СБОР ДРОПА (AutoPickup) - Приоритет выше, чем поиск руды
+        if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
+            targetItem = findNearestItem(client, player);
+        }
+
+        if (targetItem != null) {
+            double distToItem = player.getPos().distanceTo(targetItem.getPos());
+            
+            // Если предмет близко (меньше 1.3 блоков), игра его подберет сама
+            if (distToItem > 1.3) {
+                lookAtEntity(player, targetItem);
+                client.options.forwardKey.setPressed(true);
+                if (targetItem.getY() > player.getY() + 0.5 && player.horizontalCollision) {
+                    client.options.jumpKey.setPressed(true);
+                } else {
+                    client.options.jumpKey.setPressed(false);
+                }
+            } else {
+                client.options.forwardKey.setPressed(false);
+                client.options.jumpKey.setPressed(false);
+            }
+            return; // Пока не подберем предмет, руду не ищем!
+        }
+
+        // 2. ПОИСК И КОПАНИЕ РУДЫ
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             targetBlock = findNearestOre(client, player);
         }
@@ -253,6 +280,16 @@ public class Modules {
             if (canWalkForward(client, player)) client.options.forwardKey.setPressed(true);
             else startDetour(); 
         }
+    }
+
+    // ================== ПОИСК ДРОПА ==================
+    private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
+        // Ищем предметы в радиусе 6 блоков (чтобы далеко не убегать)
+        return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(6.0), 
+            e -> e.isAlive() && !e.getStack().isEmpty())
+            .stream()
+            .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
+            .orElse(null);
     }
 
     private boolean canWalkForward(MinecraftClient client, ClientPlayerEntity player) {
