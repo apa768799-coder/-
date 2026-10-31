@@ -167,30 +167,67 @@ public class Modules {
         }
     }
 
-    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
-        xrayBlocks.clear();
-        BlockPos pPos = player.getBlockPos();
-        int radius = 25; 
+    // ================== ЛЕГИТНЫЙ SCAFFOLD ==================
+    private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
+        // Не ставим блоки, если мы на земле или в воде
+        if (player.isOnGround() || player.isTouchingWater() || player.isInLava()) return;
 
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    BlockPos pos = pPos.add(x, y, z);
-                    Block b = client.world.getBlockState(pos).getBlock();
-                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE ||
-                        b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE ||
-                        b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE ||
-                        b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE ||
-                        b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE ||
-                        b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) {
-                        xrayBlocks.add(pos);
+        BlockPos below = player.getBlockPos().down();
+        
+        // Если под нами воздух или лава - ставим блок
+        if (client.world.getBlockState(below).isAir() || client.world.getBlockState(below).getBlock() == Blocks.LAVA) {
+            for (int i = 0; i < 9; i++) {
+                ItemStack stack = player.getInventory().getStack(i);
+                if (stack.getItem() instanceof BlockItem) {
+                    if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
+                    
+                    // Ищем блок, к которому можно прикрепить наш блок (сзади нас)
+                    BlockPos neighbor = below.offset(player.getHorizontalFacing().getOpposite());
+                    
+                    // Если сзади есть твердый блок (не воздух и не лава)
+                    if (!client.world.getBlockState(neighbor).isAir() && client.world.getBlockState(neighbor).getBlock() != Blocks.LAVA) {
+                        
+                        // 1. Тихо зажимаем Shift (Sneak), чтобы не упасть
+                        client.options.sneakKey.setPressed(true);
+                        
+                        // 2. Запоминаем текущий поворот камеры
+                        float prevYaw = player.getYaw();
+                        float prevPitch = player.getPitch();
+                        
+                        // 3. Тихо поворачиваем камеру на блок сзади, чтобы античит не спалил
+                        Vec3d hitVec = Vec3d.ofCenter(neighbor).add(0, 0.5, 0);
+                        double dx = hitVec.x - player.getX();
+                        double dy = hitVec.y - player.getEyeY();
+                        double dz = hitVec.z - player.getZ();
+                        double dist = Math.sqrt(dx*dx + dz*dz);
+                        
+                        float targetYaw = (float)(Math.toDegrees(Math.atan2(dz, dx)) - 90.0f);
+                        float targetPitch = (float)-Math.toDegrees(Math.atan2(dy, dist));
+                        
+                        player.setYaw(targetYaw);
+                        player.setPitch(targetPitch);
+                        
+                        // 4. Ставим блок
+                        BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, neighbor, false);
+                        client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
+                        player.swingHand(Hand.MAIN_HAND);
+                        
+                        // 5. Возвращаем камеру обратно
+                        player.setYaw(prevYaw);
+                        player.setPitch(prevPitch);
+                        return;
                     }
                 }
+            }
+        } else {
+            // Если под нами блок, отпускаем Shift
+            if (client.options.sneakKey.isPressed()) {
+                client.options.sneakKey.setPressed(false);
             }
         }
     }
 
-    // ================== ИСПРАВЛЕННЫЙ AUTOMINE (БЕЗ ТУПНЯКОВ) ==================
+    // ================== AUTOMINE (БЕЗ ТУПНЯКОВ) ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -220,7 +257,6 @@ public class Modules {
             }
         }
 
-        // 1. Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
@@ -244,7 +280,6 @@ public class Modules {
             }
         }
 
-        // 2. Поиск руды
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
@@ -252,7 +287,6 @@ public class Modules {
             if (targetBlock != null) SmartClient.addLog("Цель: " + oreNames[targetOreIndex]);
         }
 
-        // 3. Движение и копание
         if (targetBlock != null) {
             targetTimer++;
             if (targetTimer > 600) { 
@@ -266,7 +300,6 @@ public class Modules {
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
-            // Если в зоне досягаемости - копаем
             if (dist <= 4.0) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
@@ -283,7 +316,6 @@ public class Modules {
                 return;
             }
 
-            // Умное движение (Лестницы)
             int dy = targetBlock.getY() - player.getBlockPos().getY();
             
             if (dy >= 2) {
@@ -306,14 +338,12 @@ public class Modules {
                 return;
             }
 
-            // РУДА НА ОДНОМ УРОВНЕ (ИСПРАВЛЕНИЕ БАГА)
             updateState("Иду к руде");
             lookAt(player, targetBlock);
 
             BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
             BlockPos frontUp = front.up();
 
-            // Проверка на лаву впереди
             if (client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
                 updateState("Лава! Отмена");
                 blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
@@ -321,7 +351,6 @@ public class Modules {
                 return;
             }
 
-            // Если впереди стена - ломаем её (не прыгаем)
             if (!client.world.getBlockState(front).isAir() || !client.world.getBlockState(frontUp).isAir()) {
                 updateState("Копаю путь");
                 client.options.forwardKey.setPressed(false);
@@ -333,10 +362,7 @@ public class Modules {
                 return;
             }
 
-            // Путь свободен - идем
             client.options.forwardKey.setPressed(true);
-            
-            // Прыгаем ТОЛЬКО если это ступенька высотой 1 блок (уперлись, но впереди воздух)
             if (player.horizontalCollision && player.isOnGround() && client.world.getBlockState(front).isAir()) {
                 client.options.jumpKey.setPressed(true);
             } else {
@@ -345,7 +371,6 @@ public class Modules {
             return;
         }
 
-        // Туннель, если руды нет
         updateState("Руд нет, копаю туннель");
         BlockPos tunnelFront = player.getBlockPos().offset(player.getHorizontalFacing());
         BlockPos tunnelFrontUp = tunnelFront.up();
@@ -546,23 +571,6 @@ public class Modules {
         return null;
     }
 
-    private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.isOnGround() || player.isTouchingWater() || player.getVelocity().y > 0.1) return;
-        BlockPos below = player.getBlockPos().down();
-        if (client.world.getBlockState(below).isAir()) {
-            for (int i = 0; i < 9; i++) {
-                ItemStack stack = player.getInventory().getStack(i);
-                if (stack.getItem() instanceof BlockItem) {
-                    if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
-                    BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below), Direction.UP, below, false);
-                    client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
-                    player.swingHand(Hand.MAIN_HAND);
-                    return;
-                }
-            }
-        }
-    }
-
     private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {
         FishingBobberEntity hook = null;
         for (net.minecraft.entity.Entity e : client.world.getEntities()) {
@@ -584,7 +592,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
-    // ================== КРАСИВЫЕ ВИЗУАЛЫ (3D CORNER ESP) ==================
+    // ================== КРАСИВЫЕ ВИЗУАЛЫ ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
