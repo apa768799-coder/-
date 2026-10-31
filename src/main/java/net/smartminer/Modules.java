@@ -75,10 +75,10 @@ public class Modules {
     public boolean holeESP = false;
     public boolean autoTrap = false;
 
-    // Умный AutoMine
-    public boolean smartOreSelection = true;
-    public int     minOrePriority    = 0;
-    public int     minHpToMine       = 6;
+    // Настройки умного AutoMine
+    public boolean smartOreSelection = true;   
+    public int     minOrePriority    = 0;      
+    public int     minHpToMine       = 6;      
 
     // Руды для X-Ray
     public boolean xrayDiamond = true;
@@ -112,29 +112,25 @@ public class Modules {
     private int actionDelay = 0;
     private int targetItemTimer = 0;
     private int targetTimer = 0;
-    private BlockPos currentlyBreaking = null;
-    private int breakStuckTicks = 0;
     
+    // Умный AutoMine
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
     private final Map<BlockPos, Long> veinBlocks = new HashMap<>();
-
     private BlockPos currentBreakTarget = null;
     private int totalStuckTicks = 0;
     private int stuckEscalationLevel = 0;
-    private Vec3d stuckStartPos = null;
-    private BlockPos alternateApproachTarget = null;
     private BlockPos lastTargetBlock = null;
-
-    private int stuckTicks = 0;
-    private Vec3d lastPos = Vec3d.ZERO;
-    private int strafeTicks = 0;
-    private boolean strafeLeft = false;
+    
+    // Реакция на приват (чат)
+    private long lastChatWarningTime = 0;
+    private int regionEscapeTicks = 0;
 
     private Random random = new Random();
     private String lastLoggedState = "";
 
     public List<DamageNumber> damageNumbersList = new ArrayList<>();
 
+    // Приоритеты руд
     private static final Map<Block, Integer> ORE_PRIORITY = new HashMap<>();
     static {
         ORE_PRIORITY.put(Blocks.DIAMOND_ORE,            100);
@@ -203,6 +199,34 @@ public class Modules {
         this.minHpToMine       = other.minHpToMine;
     }
 
+    // === ЧТЕНИЕ ЧАТА (ВЫЗЫВАЕТСЯ ИЗ SmartClient) ===
+    public void onChatMessage(String text) {
+        String lower = text.toLowerCase();
+        // Ловим сообщения о привате
+        if (lower.contains("can't break that block here") 
+            || lower.contains("cannot break that block") 
+            || lower.contains("нельзя сломать") 
+            || lower.contains("защищен") 
+            || lower.contains("приват")) {
+            
+            lastChatWarningTime = System.currentTimeMillis();
+            
+            if (regionEscapeTicks <= 0) {
+                regionEscapeTicks = 80; 
+                updateState("Приват! Ухожу...");
+                
+                if (targetBlock != null) {
+                    blacklistedBlocks.put(targetBlock, System.currentTimeMillis() + 99999999L);
+                    targetBlock = null;
+                }
+                if (currentBreakTarget != null) {
+                    blacklistedBlocks.put(currentBreakTarget, System.currentTimeMillis() + 99999999L);
+                }
+            }
+        }
+    }
+
+    // Для X-Ray миксина
     public boolean isXrayBlock(BlockState state) {
         Block b = state.getBlock();
         if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA) return true;
@@ -228,8 +252,7 @@ public class Modules {
     public void triggerRetreat() {
         this.escapeTicks = 40; 
         this.targetBlock = null;
-        this.currentlyBreaking = null;
-        this.breakStuckTicks = 0;
+        this.currentBreakTarget = null;
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player != null) player.setYaw(player.getYaw() + 180.0f + (float)(Math.random() * 30 - 15)); 
     }
@@ -241,7 +264,6 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
         if (actionDelay > 0) { actionDelay--; return; }
-        if (strafeTicks > 0) strafeTicks--;
 
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
@@ -319,7 +341,7 @@ public class Modules {
     private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
         xrayBlocks.clear();
         BlockPos pPos = player.getBlockPos();
-        int radius = 15; // Уменьшили радиус для производительности
+        int radius = 15; 
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
@@ -444,6 +466,23 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
+        // 1. Проверяем, не сбегаем ли мы из привата
+        if (regionEscapeTicks > 0) {
+            regionEscapeTicks--;
+            client.options.backKey.setPressed(true); 
+            client.options.forwardKey.setPressed(false);
+            
+            if (regionEscapeTicks % 10 == 0) {
+                player.setYaw(player.getYaw() + (random.nextBoolean() ? 60.0f : -60.0f));
+            }
+            
+            if (regionEscapeTicks == 0) {
+                client.options.backKey.setPressed(false);
+                updateState("Возвращаюсь к работе");
+            }
+            return;
+        }
+
         if (escapeTicks > 0) {
             escapeTicks--;
             updateState("Отступаю от привата...");
@@ -523,13 +562,9 @@ public class Modules {
             }
         }
 
-        if (targetBlock == null
-            || client.world.getBlockState(targetBlock).isAir()
-            || blacklistedBlocks.containsKey(targetBlock)) {
+        if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState(smartOreSelection ? "Умный скан руд..." : "Сканирую руду");
-            targetBlock = smartOreSelection
-                ? findBestOre(client, player)
-                : findNearestOre(client, player);
+            targetBlock = smartOreSelection ? findBestOre(client, player) : findNearestOre(client, player);
             targetTimer = 0;
 
             if (targetBlock != null && !targetBlock.equals(lastTargetBlock)) {
@@ -556,6 +591,7 @@ public class Modules {
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
 
+                // Проверка видимости (Raycast)
                 Vec3d eye = player.getEyePos();
                 BlockHitResult hit = client.world.raycast(new RaycastContext(
                         eye, targetCenter, RaycastContext.ShapeType.COLLIDER, 
@@ -579,6 +615,21 @@ public class Modules {
                         totalStuckTicks = 0;
                     }
                     totalStuckTicks++;
+
+                    // Если сервер пишет, что нельзя копать — срабатывает побег
+                    if (System.currentTimeMillis() - lastChatWarningTime < 1500) {
+                        updateState("Здесь нельзя копать (Приват)");
+                        for (int dx = -2; dx <= 2; dx++) {
+                            for (int dy = -2; dy <= 2; dy++) {
+                                for (int dz = -2; dz <= 2; dz++) {
+                                    blacklistedBlocks.put(targetBlock.add(dx, dy, dz), System.currentTimeMillis() + 99999999L);
+                                }
+                            }
+                        }
+                        targetBlock = null;
+                        regionEscapeTicks = 80; 
+                        return;
+                    }
 
                     breakBlock(client, player, targetBlock);
 
@@ -698,13 +749,9 @@ public class Modules {
     }
 
     private void resetStuckState() {
-        currentlyBreaking = null;
-        breakStuckTicks = 0;
         currentBreakTarget = null;
         totalStuckTicks = 0;
         stuckEscalationLevel = 0;
-        stuckStartPos = null;
-        alternateApproachTarget = null;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.options != null) {
             mc.options.leftKey.setPressed(false);
@@ -794,13 +841,6 @@ public class Modules {
         if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
             blacklistedBlocks.put(pos, System.currentTimeMillis());
             return;
-        }
-
-        if (pos.equals(currentlyBreaking)) {
-            breakStuckTicks++;
-        } else {
-            currentlyBreaking = pos;
-            breakStuckTicks = 0;
         }
 
         Direction face = getBreakFace(player, pos);
