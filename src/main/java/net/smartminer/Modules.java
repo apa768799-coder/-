@@ -5,6 +5,9 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.block.entity.EnderChestBlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
@@ -13,10 +16,12 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
@@ -32,8 +37,10 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -41,7 +48,6 @@ public class Modules {
     public boolean autoMine = false;
     public boolean autoFish = false;
     public boolean killAura = false;
-    public boolean fullBright = false;
     public boolean antiAfk = false;
     public boolean autoArmor = false;
     public boolean scaffold = false;
@@ -52,9 +58,15 @@ public class Modules {
     public boolean noFall = false;
     public boolean autoRespawn = false;
     public boolean sprint = false;
-    public boolean fastPlace = false;
+    
+    // ВИЗУАЛЫ
+    public boolean fullBright = false;
     public boolean playerESP = false;
     public boolean xray = false;
+    public boolean itemESP = false;
+    public boolean chestESP = false;
+    public boolean glowESP = false; 
+    public boolean tracers = false; 
 
     // ВЫБОР РУД ДЛЯ X-RAY
     public boolean xrayDiamond = true;
@@ -75,11 +87,15 @@ public class Modules {
     
     public LivingEntity killAuraTarget = null;
 
+    private List<BlockPos> xrayBlocks = new ArrayList<>();
+    private int xrayTimer = 0;
+
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
     private int escapeTicks = 0;
     private int actionDelay = 0;
+    private int targetItemTimer = 0;
     
     private int targetTimer = 0;
     private BlockPos currentlyBreaking = null;
@@ -94,9 +110,41 @@ public class Modules {
     private Random random = new Random();
     private String lastLoggedState = "";
 
-    // НОВАЯ ПЕРЕМЕННАЯ ДЛЯ ТАЙМЕРА ЛУТА
-    private int targetItemTimer = 0;
+    // ================== МЕТОД ДЛЯ ЗАГРУЗКИ КОНФИГА ==================
+    public void copyFrom(Modules other) {
+        this.autoMine = other.autoMine;
+        this.autoFish = other.autoFish;
+        this.killAura = other.killAura;
+        this.antiAfk = other.antiAfk;
+        this.autoArmor = other.autoArmor;
+        this.scaffold = other.scaffold;
+        this.velocity = other.velocity;
+        this.chestStealer = other.chestStealer;
+        this.autoTotem = other.autoTotem;
+        this.noFall = other.noFall;
+        this.autoRespawn = other.autoRespawn;
+        this.sprint = other.sprint;
+        
+        this.fullBright = other.fullBright;
+        this.playerESP = other.playerESP;
+        this.xray = other.xray;
+        this.itemESP = other.itemESP;
+        this.chestESP = other.chestESP;
+        this.glowESP = other.glowESP;
+        this.tracers = other.tracers;
 
+        this.xrayDiamond = other.xrayDiamond;
+        this.xrayIron = other.xrayIron;
+        this.xrayGold = other.xrayGold;
+        this.xrayEmerald = other.xrayEmerald;
+        this.xrayCoal = other.xrayCoal;
+        this.xrayRedstone = other.xrayRedstone;
+        this.xrayLapis = other.xrayLapis;
+
+        this.targetOreIndex = other.targetOreIndex;
+    }
+
+    // ================== ПРОВЕРКА ДЛЯ X-RAY ==================
     public boolean isXrayBlock(BlockState state) {
         Block b = state.getBlock();
         if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA) return true;
@@ -140,6 +188,25 @@ public class Modules {
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
 
+        if (xray) {
+            xrayTimer++;
+            if (xrayTimer >= 20) { 
+                updateXrayBlocks(client, player);
+                xrayTimer = 0;
+            }
+        }
+
+        if (glowESP && client.world != null) {
+            for (Entity e : client.world.getEntities()) {
+                if (e instanceof PlayerEntity && e != player) e.setGlowing(true);
+                if (e instanceof MobEntity) e.setGlowing(true);
+            }
+        } else if (client.world != null) {
+            for (Entity e : client.world.getEntities()) {
+                if (e.isGlowing()) e.setGlowing(false);
+            }
+        }
+
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
 
@@ -178,6 +245,29 @@ public class Modules {
         if (autoRespawn && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
             player.requestRespawn();
             client.setScreen(null);
+        }
+    }
+
+    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
+        xrayBlocks.clear();
+        BlockPos pPos = player.getBlockPos();
+        int radius = 25; 
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    Block b = client.world.getBlockState(pos).getBlock();
+                    boolean isTarget = false;
+                    if (xrayDiamond && (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE)) isTarget = true;
+                    if (xrayIron && (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE)) isTarget = true;
+                    if (xrayGold && (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE)) isTarget = true;
+                    if (xrayEmerald && (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE)) isTarget = true;
+                    if (xrayCoal && (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE)) isTarget = true;
+                    if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) isTarget = true;
+                    if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) isTarget = true;
+                    if (isTarget) xrayBlocks.add(pos);
+                }
+            }
         }
     }
 
@@ -246,20 +336,16 @@ public class Modules {
             }
         }
 
-        // ================== СБОР ЛУТА С ТАЙМЕРОМ ==================
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
-            targetItemTimer = 0; // Сбрасываем таймер при новом предмете
+            targetItemTimer = 0;
         }
 
         if (targetItem != null) {
             targetItemTimer++;
             double dist = player.getPos().distanceTo(targetItem.getPos());
-
-            // Если мы пытаемся подобрать предмет дольше 2 секунд (40 тиков) или подошли вплотную, а он не берется
             if (targetItemTimer > 40 || (dist < 1.5 && targetItemTimer > 15)) {
-                SmartClient.addLog("Не могу подобрать предмет, бросаю");
-                targetItem = null; // Забываем про этот предмет
+                targetItem = null;
                 targetItemTimer = 0;
             } else {
                 updateState("Сбор лута");
@@ -275,18 +361,15 @@ public class Modules {
             }
         }
 
-        // ================== ПОИСК И КОПАНИЕ РУДЫ ==================
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
             targetTimer = 0;
-            if (targetBlock != null) SmartClient.addLog("Цель: " + oreNames[targetOreIndex]);
         }
 
         if (targetBlock != null) {
             targetTimer++;
             if (targetTimer > 600) { 
-                SmartClient.addLog("Слишком долго, отмена");
                 blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                 targetBlock = null;
                 return;
@@ -588,6 +671,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
+    // ================== ОТРИСОВКА ВИЗУАЛОВ ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -599,17 +683,73 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
+            Vec3d eye = MinecraftClient.getInstance().player != null ? MinecraftClient.getInstance().player.getEyePos() : camPos;
 
-            if (targetBlock != null) {
-                Box box = new Box(targetBlock).expand(0.005);
-                drawCornerBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+            // X-RAY (Полные боксы)
+            if (xray) {
+                for (BlockPos pos : xrayBlocks) {
+                    Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
+                    float r = 1.0f, g = 1.0f, bl = 1.0f;
+                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) { r = 0.0f; g = 1.0f; bl = 1.0f; } 
+                    else if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) { r = 0.0f; g = 1.0f; bl = 0.0f; } 
+                    else if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE) { r = 1.0f; g = 1.0f; bl = 0.0f; } 
+                    else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; } 
+                    else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; } 
+                    else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; } 
+                    else if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) { r = 0.2f; g = 0.2f; bl = 0.2f; }
+                    
+                    Box box = new Box(pos).expand(0.002);
+                    drawFullBox(matrices, lines, box, r, g, bl, 1.0f);
+                    
+                    if (tracers) {
+                        Vec3d targetVec = Vec3d.ofCenter(pos);
+                        lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(r, g, bl, 1.0f).normal(0, 1, 0);
+                        lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(r, g, bl, 1.0f).normal(0, 1, 0);
+                    }
+                }
             }
 
+            // Player ESP
             if (playerESP && MinecraftClient.getInstance().world != null) {
-                for (net.minecraft.entity.player.PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
+                for (PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
                     if (p != MinecraftClient.getInstance().player) {
                         Box box = p.getBoundingBox().expand(0.1);
-                        drawCornerBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+                        drawFullBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+                        if (tracers) {
+                            Vec3d targetVec = p.getPos();
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                        }
+                    }
+                }
+            }
+
+            // Chest ESP
+            if (chestESP && MinecraftClient.getInstance().world != null) {
+                for (BlockEntity be : MinecraftClient.getInstance().world.blockEntities) {
+                    if (be instanceof ChestBlockEntity || be instanceof EnderChestBlockEntity) {
+                        Box box = new Box(be.getPos()).expand(0.002);
+                        drawFullBox(matrices, lines, box, 1.0f, 0.5f, 0.0f, 1.0f);
+                        if (tracers) {
+                            Vec3d targetVec = Vec3d.ofCenter(be.getPos());
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
+                        }
+                    }
+                }
+            }
+
+            // Item ESP
+            if (itemESP && MinecraftClient.getInstance().world != null) {
+                for (Entity e : MinecraftClient.getInstance().world.getEntities()) {
+                    if (e instanceof ItemEntity) {
+                        Box box = e.getBoundingBox().expand(0.1);
+                        drawFullBox(matrices, lines, box, 1.0f, 1.0f, 0.0f, 1.0f);
+                        if (tracers) {
+                            Vec3d targetVec = e.getPos();
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 1.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                            lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 1.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                        }
                     }
                 }
             }
@@ -617,71 +757,28 @@ public class Modules {
         matrices.pop();
     }
 
-    private void drawCornerBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) {
+    private void drawFullBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) {
         Matrix4f matrix = matrices.peek().getPositionMatrix();
         float x1 = (float) box.minX, y1 = (float) box.minY, z1 = (float) box.minZ;
         float x2 = (float) box.maxX, y2 = (float) box.maxY, z2 = (float) box.maxZ;
-        float len = (x2 - x1) * 0.25f; 
 
-        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1 + len, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+        // Нижняя грань
+        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
 
-        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2 - len, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+        // Верхняя грань
+        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
 
-        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1 + len, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1, z2 - len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2 - len, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z2 - len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1 + len, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2, z1 + len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2 - len, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z1 + len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1 + len, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2, z2 - len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2 - len, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z2 - len).color(r, g, b, a).normal(0, 1, 0);
-
-        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1 + len, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1 + len, z1).color(r, g, b, a).normal(0, 1, 0);
-        
-        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y1 + len, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y1 + len, z2).color(r, g, b, a).normal(0, 1, 0);
-        
-        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2 - len, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2 - len, z1).color(r, g, b, a).normal(0, 1, 0);
-        
-        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x1, y2 - len, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
-        lines.vertex(matrix, x2, y2 - len, z2).color(r, g, b, a).normal(0, 1, 0);
+        // Вертикальные стойки
+        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0); lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
     }
 
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
@@ -699,7 +796,7 @@ public class Modules {
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 
-    private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
+    private void lookAtEntity(ClientPlayerEntity player, Entity entity) {
         Vec3d target = entity.getPos();
         double dx = target.x - player.getX(); 
         double dy = target.y + entity.getHeight() / 2 - player.getEyeY(); 
@@ -716,7 +813,7 @@ public class Modules {
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 
-    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
+    private float getYawToEntity(ClientPlayerEntity player, Entity entity) {
         double dx = entity.getX() - player.getX();
         double dz = entity.getZ() - player.getZ();
         return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
