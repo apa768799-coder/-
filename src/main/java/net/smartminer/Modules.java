@@ -111,14 +111,19 @@ public class Modules {
             
             BlockPos hitBlock = hit.getBlockPos();
 
+            // СТРОГАЯ ЗАЩИТА: НИКОГДА не копаем блок под ногами и под ногами спереди
+            if (hitBlock.equals(player.getBlockPos().down()) || hitBlock.equals(player.getBlockPos().down(2))) {
+                // Если бот посмотрел вниз, заставляем его смотреть прямо
+                lookAt(player, player.getBlockPos().offset(player.getHorizontalFacing()));
+                return;
+            }
+
             // Если луч уперся НЕ в руду, значит перед нами стена/камень
             if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
                 double distToWall = player.getPos().distanceTo(Vec3d.ofCenter(hitBlock));
                 
                 if (distToWall <= 4.5) {
-                    // Стена близко - ломаем её, чтобы прокопать путь к руде
                     client.options.forwardKey.setPressed(false);
-                    client.options.jumpKey.setPressed(false);
                     lookAt(player, hitBlock);
                     if (breakCooldown <= 0) {
                         client.interactionManager.updateBlockBreakingProgress(hitBlock, Direction.UP);
@@ -126,11 +131,10 @@ public class Modules {
                         breakCooldown = 2;
                     }
                 } else {
-                    // Стена далеко - идем к ней
                     lookAt(player, hitBlock);
                     client.options.forwardKey.setPressed(true);
                 }
-                return; // Выходим, так как сначала надо сломать стену
+                return; 
             }
 
             // --- ЕСЛИ ПУТЬ СВОБОДЕН ---
@@ -139,20 +143,22 @@ public class Modules {
             if (distToOre > 3.5) {
                 lookAt(player, targetBlock);
                 client.options.forwardKey.setPressed(true);
-                client.options.jumpKey.setPressed(false); // Не прыгаем на ровном месте
+                
+                // Если цель выше нас на 1.5 блока и мы уперлись - прыгаем
+                if (targetBlock.getY() > player.getY() + 1.0 && player.horizontalCollision) {
+                    client.options.jumpKey.setPressed(true);
+                } else {
+                    client.options.jumpKey.setPressed(false);
+                }
 
-                // Анти-Застревание (если идем-идем, а не движемся)
+                // Анти-Застревание
                 double moved = player.getPos().squaredDistanceTo(lastPos);
-                if (moved < 0.001) {
-                    stuckTicks++;
-                    if (stuckTicks > 15) {
-                        client.options.jumpKey.setPressed(true); // Прыгаем, чтобы перепрыгнуть
-                    }
-                } else stuckTicks = 0;
+                if (moved < 0.001) stuckTicks++; else stuckTicks = 0;
+                if (stuckTicks > 15) client.options.jumpKey.setPressed(true);
                 lastPos = player.getPos();
 
             } else {
-                // Руда в зоне досягаемости, путь свободен - копаем!
+                // Руда близко, копаем её
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
@@ -163,7 +169,6 @@ public class Modules {
                 }
             }
         } else {
-            // Если руды не видно, просто идем вперед
             client.options.jumpKey.setPressed(false);
             client.options.forwardKey.setPressed(true);
         }
@@ -172,7 +177,7 @@ public class Modules {
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 40.0; // Увеличили радиус поиска до 40 блоков
+        double bestDist = 40.0; 
 
         Block t1 = switch (targetOreIndex) {
             case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
