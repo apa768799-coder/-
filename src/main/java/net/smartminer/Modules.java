@@ -77,7 +77,7 @@ public class Modules {
 
     // Умный AutoMine
     public boolean smartOreSelection = true;   // true = копать всё ценное по приоритету
-    public int     minOrePriority    = 0;      // 0 = все руды, 30 = без угля, 90 = только алмаз/изумруд
+    public int     minOrePriority    = 0;      // 0 = все, 30 = без угля, 90 = только алмаз/изумруд
     public int     minHpToMine       = 6;      // не копать, если HP ниже
 
     // Руды для X-Ray
@@ -116,10 +116,11 @@ public class Modules {
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
 
-    // Очередь незаконченной жилы (умный AutoMine)
+    // Очередь незаконченной жилы
     private final Map<BlockPos, Long> veinBlocks = new HashMap<>();
 
     // Умное поведение при застревании
+    private BlockPos currentBreakTarget = null;
     private int totalStuckTicks = 0;
     private int stuckEscalationLevel = 0;
     private Vec3d stuckStartPos = null;
@@ -136,7 +137,7 @@ public class Modules {
 
     public List<DamageNumber> damageNumbersList = new ArrayList<>();
 
-    // Приоритеты руд для умного AutoMine
+    // Приоритеты руд
     private static final Map<Block, Integer> ORE_PRIORITY = new HashMap<>();
     static {
         ORE_PRIORITY.put(Blocks.DIAMOND_ORE,            100);
@@ -562,6 +563,7 @@ public class Modules {
                 client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
 
+                // Блок сломан — успех
                 if (client.world.getBlockState(targetBlock).isAir()) {
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     if (smartOreSelection) addVeinBlocks(client, targetBlock);
@@ -572,16 +574,66 @@ public class Modules {
                     return;
                 }
 
+                // Считаем тики на конкретном блоке
+                if (!targetBlock.equals(currentBreakTarget)) {
+                    currentBreakTarget = targetBlock;
+                    totalStuckTicks = 0;
+                }
                 totalStuckTicks++;
-                if (totalStuckTicks > 60) {
-                    handleStuckMining(client, player);
+
+                // ВСЕГДА копаем
+                breakBlock(client, player, targetBlock);
+
+                // ── 2-4 сек: обкусываем соседей ──
+                if (totalStuckTicks > 40 && totalStuckTicks <= 100) {
+                    if (stuckEscalationLevel < 1) {
+                        stuckEscalationLevel = 1;
+                        updateState("Обнажаю руду — копаю рядом");
+                    }
+                    if (totalStuckTicks % 5 == 0) {
+                        for (Direction d : new Direction[]{Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+                            BlockPos adj = targetBlock.offset(d);
+                            Block adjBlock = client.world.getBlockState(adj).getBlock();
+                            if (adjBlock == Blocks.AIR || adjBlock == Blocks.BEDROCK
+                                || adjBlock == Blocks.BARRIER || adjBlock == Blocks.OBSIDIAN) continue;
+                            float hardness = adjBlock.getHardness();
+                            if (hardness >= 0 && hardness < 4.0f) {
+                                lookAt(player, adj);
+                                breakBlock(client, player, adj);
+                                return;
+                            }
+                        }
+                    }
                     return;
                 }
 
-                breakBlock(client, player, targetBlock);
+                // ── 4-10 сек: обход с другой стороны, продолжая бить ──
+                if (totalStuckTicks > 100 && totalStuckTicks <= 200) {
+                    if (stuckEscalationLevel < 2) {
+                        stuckEscalationLevel = 2;
+                        updateState("Меняю угол — обхожу");
+                        alternateApproachTarget = findAlternateApproachPosition(client, player, targetBlock);
+                    }
+                    if (alternateApproachTarget != null) {
+                        lookAt(player, alternateApproachTarget);
+                        client.options.forwardKey.setPressed(true);
+                        if (player.horizontalCollision && player.isOnGround()) player.jump();
+                    }
+                    return;
+                }
+
+                // ── >10 сек: не берётся — короткий блэклист и ищем другую ──
+                if (totalStuckTicks > 200) {
+                    updateState("Руда не берётся — ищу другую");
+                    blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
+                    veinBlocks.remove(targetBlock);
+                    targetBlock = null;
+                    resetStuckState();
+                }
                 return;
             }
 
+            // ───── Навигация (твоя, без изменений) ─────
             int dy = targetBlock.getY() - player.getBlockPos().getY();
 
             if (dy >= 2) {
@@ -638,6 +690,7 @@ public class Modules {
             return;
         }
 
+        // ───── Туннель (твой, без изменений) ─────
         updateState("Руд нет, копаю туннель");
         BlockPos tunnelFront = player.getBlockPos().offset(player.getHorizontalFacing());
         BlockPos tunnelFrontUp = tunnelFront.up();
@@ -659,135 +712,8 @@ public class Modules {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //        ПОВЕДЕНИЕ ПРИ ЗАСТРЕВАНИИ (без отступления)
+    //                     ХЕЛПЕРЫ
     // ═══════════════════════════════════════════════════════════
-    private void handleStuckMining(MinecraftClient client, ClientPlayerEntity player) {
-        if (targetBlock == null) { resetStuckState(); return; }
-
-        // Игрок реально сдвинулся — значит не застрял
-        if (stuckStartPos != null) {
-            double dx = player.getPos().x - stuckStartPos.x;
-            double dz = player.getPos().z - stuckStartPos.z;
-            if (Math.sqrt(dx * dx + dz * dz) > 1.5) {
-                breakStuckTicks = 0;
-                totalStuckTicks = 0;
-                stuckEscalationLevel = 0;
-                stuckStartPos = null;
-                alternateApproachTarget = null;
-                currentlyBreaking = null;
-                return;
-            }
-        } else {
-            stuckStartPos = player.getPos();
-        }
-
-        int t = totalStuckTicks;
-
-        // L1: 60-120 тиков (3-6 сек) — меняем угол и позицию
-        if (t < 120) {
-            if (stuckEscalationLevel < 1) {
-                stuckEscalationLevel = 1;
-                updateState("Блок не поддаётся — меняю угол");
-            }
-            if (player.isOnGround() && random.nextFloat() < 0.3f) player.jump();
-            if (random.nextFloat() < 0.15f) {
-                boolean left = random.nextBoolean();
-                client.options.leftKey.setPressed(left);
-                client.options.rightKey.setPressed(!left);
-            }
-            totalStuckTicks++;
-            return;
-        }
-
-        // L2: 120-220 тиков (6-11 сек) — обходим руду с другой стороны
-        if (t < 220) {
-            if (stuckEscalationLevel < 2) {
-                stuckEscalationLevel = 2;
-                updateState("Обхожу руду с другой стороны");
-                alternateApproachTarget = findAlternateApproachPosition(client, player, targetBlock);
-            }
-
-            client.options.leftKey.setPressed(false);
-            client.options.rightKey.setPressed(false);
-            client.options.jumpKey.setPressed(false);
-
-            if (alternateApproachTarget == null
-                || !client.world.getBlockState(alternateApproachTarget).isAir()
-                || !client.world.getBlockState(alternateApproachTarget.up()).isAir()) {
-                alternateApproachTarget = findAlternateApproachPosition(client, player, targetBlock);
-            }
-
-            if (alternateApproachTarget != null) {
-                lookAt(player, alternateApproachTarget);
-
-                BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-                if (!client.world.getBlockState(front).isAir()) {
-                    breakBlock(client, player, front);
-                } else if (player.horizontalCollision && player.isOnGround()) {
-                    player.jump();
-                } else {
-                    client.options.forwardKey.setPressed(true);
-                }
-            }
-            totalStuckTicks++;
-            return;
-        }
-
-        // L3: 220+ тиков (>11 сек) — эта руда недоступна, ищем другую
-        if (stuckEscalationLevel < 3) {
-            stuckEscalationLevel = 3;
-            updateState("Руда недоступна — ищу другую");
-        }
-        blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
-        veinBlocks.remove(targetBlock);
-        targetBlock = null;
-        resetStuckState();
-    }
-
-    private BlockPos findAlternateApproachPosition(MinecraftClient client, ClientPlayerEntity player, BlockPos ore) {
-        BlockPos best = null;
-        double bestScore = -1.0;
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dz = -3; dz <= 3; dz++) {
-                if (Math.abs(dx) + Math.abs(dz) < 2) continue;
-                BlockPos p = ore.add(dx, 0, dz);
-                if (!client.world.getBlockState(p).isAir()) continue;
-                if (!client.world.getBlockState(p.up()).isAir()) continue;
-                if (client.world.getBlockState(p.down()).isAir()) continue;
-                if (blacklistedBlocks.containsKey(p)) continue;
-
-                double oreDist = Vec3d.ofCenter(p).distanceTo(Vec3d.ofCenter(ore));
-                if (oreDist > 4.5) continue;
-
-                double playerDist = player.getPos().distanceTo(Vec3d.ofCenter(p));
-                double score = 10.0 - playerDist;
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = p;
-                }
-            }
-        }
-        return best;
-    }
-
-    private void resetStuckState() {
-        currentlyBreaking = null;
-        breakStuckTicks = 0;
-        totalStuckTicks = 0;
-        stuckEscalationLevel = 0;
-        stuckStartPos = null;
-        alternateApproachTarget = null;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.options != null) {
-            mc.options.leftKey.setPressed(false);
-            mc.options.rightKey.setPressed(false);
-            mc.options.jumpKey.setPressed(false);
-            mc.options.forwardKey.setPressed(false);
-            mc.options.backKey.setPressed(false);
-        }
-    }
-
-    // Вспомогательные методы умного AutoMine
     private int orePriority(Block b) {
         return ORE_PRIORITY.getOrDefault(b, 0);
     }
@@ -848,6 +774,49 @@ public class Modules {
         }
     }
 
+    private BlockPos findAlternateApproachPosition(MinecraftClient client, ClientPlayerEntity player, BlockPos ore) {
+        BlockPos best = null;
+        double bestScore = -1.0;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                if (Math.abs(dx) + Math.abs(dz) < 2) continue;
+                BlockPos p = ore.add(dx, 0, dz);
+                if (!client.world.getBlockState(p).isAir()) continue;
+                if (!client.world.getBlockState(p.up()).isAir()) continue;
+                if (client.world.getBlockState(p.down()).isAir()) continue;
+                if (blacklistedBlocks.containsKey(p)) continue;
+
+                double oreDist = Vec3d.ofCenter(p).distanceTo(Vec3d.ofCenter(ore));
+                if (oreDist > 4.5) continue;
+
+                double playerDist = player.getPos().distanceTo(Vec3d.ofCenter(p));
+                double score = 10.0 - playerDist;
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = p;
+                }
+            }
+        }
+        return best;
+    }
+
+    private void resetStuckState() {
+        currentBreakTarget = null;
+        breakStuckTicks = 0;
+        totalStuckTicks = 0;
+        stuckEscalationLevel = 0;
+        stuckStartPos = null;
+        alternateApproachTarget = null;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.options != null) {
+            mc.options.leftKey.setPressed(false);
+            mc.options.rightKey.setPressed(false);
+            mc.options.jumpKey.setPressed(false);
+            mc.options.forwardKey.setPressed(false);
+            mc.options.backKey.setPressed(false);
+        }
+    }
+
     private String blockName(Block b) {
         if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) return "алмаз";
         if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) return "изумруд";
@@ -859,6 +828,10 @@ public class Modules {
         if (b == Blocks.COPPER_ORE || b == Blocks.DEEPSLATE_COPPER_ORE) return "медь";
         if (b == Blocks.COAL_ORE || b == Blocks.DEEPSLATE_COAL_ORE) return "уголь";
         if (b == Blocks.NETHER_QUARTZ_ORE) return "кварц";
+        if (b == Blocks.STONE) return "камень";
+        if (b == Blocks.DEEPSLATE) return "глубинносланец";
+        if (b == Blocks.DIRT) return "земля";
+        if (b == Blocks.GRAVEL) return "гравий";
         return "блок";
     }
 
@@ -869,16 +842,22 @@ public class Modules {
             return;
         }
 
-        if (pos.equals(currentlyBreaking)) {
-            breakStuckTicks++;
-            // авто-отступление убрано — handleStuckMining решает, что делать
-        } else {
-            currentlyBreaking = pos;
-            breakStuckTicks = 0;
-        }
-
-        client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
+        Direction face = getBreakFace(player, pos);
+        client.interactionManager.updateBlockBreakingProgress(pos, face);
         player.swingHand(Hand.MAIN_HAND);
+    }
+
+    private Direction getBreakFace(ClientPlayerEntity player, BlockPos pos) {
+        Vec3d eye = player.getEyePos();
+        Vec3d center = Vec3d.ofCenter(pos);
+        double dx = eye.x - center.x;
+        double dy = eye.y - center.y;
+        double dz = eye.z - center.z;
+
+        double ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+        if (ay >= ax && ay >= az) return dy > 0 ? Direction.UP : Direction.DOWN;
+        if (ax >= az) return dx > 0 ? Direction.EAST : Direction.WEST;
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
