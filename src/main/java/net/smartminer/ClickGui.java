@@ -8,35 +8,45 @@ import net.minecraft.client.MinecraftClient;
 
 public class ClickGui extends Screen {
     public ClickGui() {
-        super(Text.literal("Smart Client"));
+        super(Text.literal("Smart Client v3"));
     }
 
     @Override
     protected void init() {
         int centerX = this.width / 2;
-        int startY = this.height / 2 - 50;
+        int startY = this.height / 2 - 60;
 
-        this.addDrawableChild(ButtonWidget.builder(getButtonText("AutoMine", SmartClient.modules.autoMine), button -> {
+        // Кнопка Авто-Майн
+        this.addDrawableChild(ButtonWidget.builder(getText("AutoMine", SmartClient.modules.autoMine), button -> {
             SmartClient.modules.autoMine = !SmartClient.modules.autoMine;
-            button.setMessage(getButtonText("AutoMine", SmartClient.modules.autoMine));
-        }).dimensions(centerX - 60, startY, 120, 20).build());
+            button.setMessage(getText("AutoMine", SmartClient.modules.autoMine));
+        }).dimensions(centerX - 80, startY, 160, 20).build());
 
-        this.addDrawableChild(ButtonWidget.builder(getButtonText("AutoFish", SmartClient.modules.autoFish), button -> {
+        // Кнопка выбора руды
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Руда: §e" + SmartClient.modules.oreNames[SmartClient.modules.targetOreIndex]), button -> {
+            SmartClient.modules.targetOreIndex = (SmartClient.modules.targetOreIndex + 1) % SmartClient.modules.oreNames.length;
+            button.setMessage(Text.literal("Руда: §e" + SmartClient.modules.oreNames[SmartClient.modules.targetOreIndex]));
+        }).dimensions(centerX - 80, startY + 25, 160, 20).build());
+
+        // Кнопка Авто-Рыбалка
+        this.addDrawableChild(ButtonWidget.builder(getText("AutoFish", SmartClient.modules.autoFish), button -> {
             SmartClient.modules.autoFish = !SmartClient.modules.autoFish;
-            button.setMessage(getButtonText("AutoFish", SmartClient.modules.autoFish));
-        }).dimensions(centerX - 60, startY + 25, 120, 20).build());
+            button.setMessage(getText("AutoFish", SmartClient.modules.autoFish));
+        }).dimensions(centerX - 80, startY + 50, 160, 20).build());
 
-        this.addDrawableChild(ButtonWidget.builder(getButtonText("KillAura", SmartClient.modules.killAura), button -> {
+        // Кнопка KillAura
+        this.addDrawableChild(ButtonWidget.builder(getText("KillAura", SmartClient.modules.killAura), button -> {
             SmartClient.modules.killAura = !SmartClient.modules.killAura;
-            button.setMessage(getButtonText("KillAura", SmartClient.modules.killAura));
-        }).dimensions(centerX - 60, startY + 50, 120, 20).build());
+            button.setMessage(getText("KillAura", SmartClient.modules.killAura));
+        }).dimensions(centerX - 80, startY + 75, 160, 20).build());
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Закрыть (Right Shift)"), button -> {
+        // Закрыть
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Закрыть"), button -> {
             MinecraftClient.getInstance().setScreen(null);
-        }).dimensions(centerX - 60, startY + 90, 120, 20).build());
+        }).dimensions(centerX - 80, startY + 110, 160, 20).build());
     }
 
-    private Text getButtonText(String name, boolean state) {
+    private Text getText(String name, boolean state) {
         return Text.literal(name + ": " + (state ? "§aВКЛ" : "§cВЫКЛ"));
     }
 
@@ -45,9 +55,11 @@ public class ClickGui extends Screen {
         this.renderBackground(context, mouseX, mouseY, delta);
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        context.fill(centerX - 80, centerY - 70, centerX + 80, centerY + 60, 0xCC000000);
-        context.drawBorder(centerX - 80, centerY - 70, 160, 130, 0xFF00FFFF);
-        context.drawCenteredTextWithShadow(this.textRenderer, "§l§bSMART CLIENT v2.0", centerX, centerY - 60, 0xFFFFFF);
+        // Темная панель с фиолетовой рамкой
+        context.fill(centerX - 100, centerY - 80, centerX + 100, centerY + 80, 0xEE101010);
+        context.drawBorder(centerX - 100, centerY - 80, 200, 160, 0xFF9900FF);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§l§dSMART CLIENT v3.0", centerX, centerY - 70, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, "§7R - AutoMine | F - AutoFish", centerX, centerY + 60, 0xAAAAAA);
         super.render(context, mouseX, mouseY, delta);
     }
 
