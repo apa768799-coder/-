@@ -8,7 +8,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.render.WorldRenderer;
+import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.mob.MobEntity;
@@ -35,7 +35,7 @@ public class Modules {
     private int fishTimer = 0;
     private int attackCooldown = 0;
     
-    // Переменные для Анти-Застревания
+    // Для анти-застревания
     private int stuckTicks = 0;
     private Vec3d lastPos = Vec3d.ZERO;
     private boolean jumping = false;
@@ -67,7 +67,6 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // Авто-выбор кирки
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -77,40 +76,36 @@ public class Modules {
             }
         }
 
-        // ================= ЛОГИКА АНТИ-ЗАСТРЕВАНИЯ =================
+        // Умный обход препятствий (Анти-застревание)
         double moved = player.getPos().squaredDistanceTo(lastPos);
-        if (moved < 0.001) {
+        if (moved < 0.001 && targetBlock != null) {
             stuckTicks++;
         } else {
             stuckTicks = 0;
             jumping = false;
             client.options.jumpKey.setPressed(false);
+            client.options.leftKey.setPressed(false);
+            client.options.rightKey.setPressed(false);
         }
         lastPos = player.getPos();
 
-        if (stuckTicks > 10 && targetBlock != null) {
-            // Если застряли - начинаем прыгать и копать впереди себя
+        if (stuckTicks > 10) {
             if (!jumping) {
                 jumping = true;
                 client.options.jumpKey.setPressed(true);
             }
-            
-            // Раз в полсекунды дергаемся в сторону (стрейф)
             if (stuckTicks % 10 == 0) {
                 client.options.leftKey.setPressed(!client.options.leftKey.isPressed());
                 client.options.rightKey.setPressed(!client.options.rightKey.isPressed());
             }
-
-            // И ломаем блок прямо перед носом, чтобы прокопать путь
             BlockPos frontBlock = player.getBlockPos().offset(player.getHorizontalFacing());
             if (!client.world.getBlockState(frontBlock).isAir() && breakCooldown <= 0) {
                 client.interactionManager.updateBlockBreakingProgress(frontBlock, Direction.UP);
                 player.swingHand(Hand.MAIN_HAND);
                 breakCooldown = 2;
             }
-            return; // Пока выбираемся, не ищем новую цель
+            return;
         }
-        // ============================================================
 
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             targetBlock = findNearestOre(client, player);
@@ -131,7 +126,6 @@ public class Modules {
                 }
             }
         } else {
-            // Ищем руду (если нет - просто идем)
             client.options.forwardKey.setPressed(true);
         }
     }
@@ -139,7 +133,7 @@ public class Modules {
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 25.0; // Радиус 25 блоков (видит далеко)
+        double bestDist = 25.0;
 
         Block t1 = switch (targetOreIndex) {
             case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
@@ -148,9 +142,9 @@ public class Modules {
             case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE; case 1 -> Blocks.DEEPSLATE_IRON_ORE; case 2 -> Blocks.DEEPSLATE_GOLD_ORE; case 3 -> Blocks.DEEPSLATE_COAL_ORE; default -> Blocks.DEEPSLATE_EMERALD_ORE;
         };
 
-        for (int x = -10; x <= 10; x++) {
-            for (int y = -10; y <= 10; y++) {
-                for (int z = -10; z <= 10; z++) {
+        for (int x = -12; x <= 12; x++) {
+            for (int y = -12; y <= 12; y++) {
+                for (int z = -12; z <= 12; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     Block b = client.world.getBlockState(pos).getBlock();
                     if (b == t1 || b == t2) {
@@ -174,17 +168,15 @@ public class Modules {
         matrices.translate(-camPos.x, -camPos.y, -camPos.z);
 
         Box box = new Box(targetBlock).expand(0.002);
-        VertexConsumerProvider.Immediate consumers = MinecraftClient.getInstance().getBufferBuilders().getEntityVertexConsumers();
-        VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-        
-        // Рисуем красную рамку вокруг блока
-        WorldRenderer.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
-        
-        consumers.draw();
+        VertexConsumerProvider consumers = context.consumers();
+        if (consumers != null) {
+            VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
+            // Рисуем красную рамку (исправленный класс для 1.21.4)
+            VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+        }
         matrices.pop();
     }
 
-    // ================== РЫБАЛКА И КОМБАТ ==================
     private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {
         FishingBobberEntity hook = null;
         for (net.minecraft.entity.Entity e : client.world.getEntities()) {
