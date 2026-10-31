@@ -22,6 +22,7 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
+import net.minecraft.particle.ParticleTypes;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -64,11 +65,14 @@ public class Modules {
     public boolean chestESP = false;
     public boolean glowESP = false; 
     public boolean tracers = false; 
-    
-    // НОВЫЕ ФУНКЦИИ PULSE VISUALS
-    public boolean criticals = false;
     public boolean trajectory = false;
+    
+    // БОЕВЫЕ ФИШКИ (Pulse Style)
+    public boolean criticals = false;
+    public boolean hitParticles = false;
     public boolean damageNumbers = false;
+    public boolean hitCounter = false;
+    public boolean lowHp = false;
 
     // ВЫБОР РУД ДЛЯ X-RAY
     public boolean xrayDiamond = true;
@@ -88,6 +92,7 @@ public class Modules {
     private BlockPos targetChest = null;
     
     public LivingEntity killAuraTarget = null;
+    public int currentHitCount = 0;
 
     private List<BlockPos> xrayBlocks = new ArrayList<>();
     private int xrayTimer = 0;
@@ -105,16 +110,15 @@ public class Modules {
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
     
     private int stuckTicks = 0;
-    private Vec3d lastPos = Vec3d.ZERO; // ИСПРАВЛЕНО: Vec3d вместо Vec3D
+    private Vec3d lastPos = Vec3d.ZERO;
     private int strafeTicks = 0;
     private boolean strafeLeft = false;
 
     private Random random = new Random();
     private String lastLoggedState = "";
 
-    // Для Damage Numbers и Hit Particles
-    private List<DamageNumber> damageNumbersList = new ArrayList<>();
-    private List<HitParticle> hitParticlesList = new ArrayList<>();
+    // Для Damage Numbers
+    public List<DamageNumber> damageNumbersList = new ArrayList<>();
 
     public void copyFrom(Modules other) {
         this.autoMine = other.autoMine;
@@ -137,9 +141,12 @@ public class Modules {
         this.chestESP = other.chestESP;
         this.glowESP = other.glowESP;
         this.tracers = other.tracers;
-        this.criticals = other.criticals;
         this.trajectory = other.trajectory;
+        this.criticals = other.criticals;
+        this.hitParticles = other.hitParticles;
         this.damageNumbers = other.damageNumbers;
+        this.hitCounter = other.hitCounter;
+        this.lowHp = other.lowHp;
 
         this.xrayDiamond = other.xrayDiamond;
         this.xrayIron = other.xrayIron;
@@ -194,9 +201,7 @@ public class Modules {
 
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
-
         damageNumbersList.removeIf(dn -> currentTime - dn.spawnTime > 1000);
-        hitParticlesList.removeIf(hp -> currentTime - hp.spawnTime > 500);
 
         if (xray) {
             xrayTimer++;
@@ -251,7 +256,6 @@ public class Modules {
         if (autoMine) doAutoMine(client, player);
         if (autoFish) doAutoFish(client, player);
         if (killAura) doKillAura(client, player);
-        if (criticals) doCriticals(client, player);
 
         if (autoRespawn && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
             player.requestRespawn();
@@ -259,7 +263,6 @@ public class Modules {
         }
     }
 
-    // === ДОБАВЛЕННЫЙ МЕТОД ДЛЯ X-RAY ===
     private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
         xrayBlocks.clear();
         BlockPos pPos = player.getBlockPos();
@@ -283,7 +286,6 @@ public class Modules {
         }
     }
 
-    // === ДОБАВЛЕННЫЙ МЕТОД ДЛЯ SCAFFOLD ===
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {
         if (player.isOnGround() || player.isTouchingWater() || player.isInLava()) return;
         BlockPos below = player.getBlockPos().down();
@@ -317,12 +319,6 @@ public class Modules {
             }
         } else {
             if (client.options.sneakKey.isPressed()) client.options.sneakKey.setPressed(false);
-        }
-    }
-
-    private void doCriticals(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.fallDistance > 0.0f && !player.isOnGround() && !player.isClimbing() && !player.isTouchingWater()) {
-            // Логика для критов
         }
     }
 
@@ -587,10 +583,27 @@ public class Modules {
                     player.swingHand(Hand.MAIN_HAND);
                     attackCooldown = 6 + random.nextInt(4); 
                     
-                    if (damageNumbers) damageNumbersList.add(new DamageNumber(target.getPos(), 5.0f));
-                    if (criticals) hitParticlesList.add(new HitParticle(target.getPos()));
+                    // Добавляем фишки при ударе
+                    float damage = 5.0f; // Примерный урон
+                    if (damageNumbers) {
+                        damageNumbersList.add(new DamageNumber(target.getPos(), damage, false));
+                    }
+                    if (hitParticles) {
+                        for (int i = 0; i < 10; i++) {
+                            client.world.addParticle(ParticleTypes.CRIT, 
+                                target.getX() + (random.nextDouble() - 0.5), 
+                                target.getY() + target.getHeight() / 2 + (random.nextDouble() - 0.5), 
+                                target.getZ() + (random.nextDouble() - 0.5), 
+                                0, 0, 0);
+                        }
+                    }
+                    if (hitCounter) {
+                        currentHitCount++;
+                    }
                 }
             }
+        } else {
+            if (hitCounter) currentHitCount = 0; // Сброс счетчика при потере цели
         }
     }
 
@@ -782,6 +795,36 @@ public class Modules {
                     }
                 }
             }
+
+            // Trajectory (Предсказание траектории)
+            if (trajectory) {
+                ClientPlayerEntity player = MinecraftClient.getInstance().player;
+                if (player != null && player.isUsingItem() && player.getActiveItem().getItem() instanceof BowItem) {
+                    Vec3d start = player.getEyePos();
+                    float pitch = player.getPitch();
+                    float yaw = player.getYaw();
+                    float vel = 3.0f; // Начальная скорость стрелы
+                    
+                    Vec3d dir = new Vec3d(
+                        -MathHelper.sin(yaw * (float)Math.PI / 180.0f) * MathHelper.cos(pitch * (float)Math.PI / 180.0f),
+                        -MathHelper.sin(pitch * (float)Math.PI / 180.0f),
+                        MathHelper.cos(yaw * (float)Math.PI / 180.0f) * MathHelper.cos(pitch * (float)Math.PI / 180.0f)
+                    );
+                    
+                    Vec3d pos = start;
+                    Vec3d velVec = dir.multiply(vel);
+                    
+                    for (int i = 0; i < 100; i++) {
+                        Vec3d nextPos = pos.add(velVec);
+                        lines.vertex(matrices.peek().getPositionMatrix(), (float)pos.x, (float)pos.y, (float)pos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                        lines.vertex(matrices.peek().getPositionMatrix(), (float)nextPos.x, (float)nextPos.y, (float)nextPos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
+                        pos = nextPos;
+                        velVec = velVec.multiply(0.99).add(0, -0.05, 0); // Гравитация и сопротивление
+                        
+                        if (MinecraftClient.getInstance().world.getBlockState(BlockPos.ofFloored(pos)).isSolid()) break;
+                    }
+                }
+            }
         }
         matrices.pop();
     }
@@ -845,22 +888,17 @@ public class Modules {
         return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
     }
 
-    private static class DamageNumber {
-        Vec3d pos;
-        float damage;
-        long spawnTime;
-        DamageNumber(Vec3d pos, float damage) {
+    // Класс для хранения данных о числе урона
+    public static class DamageNumber {
+        public Vec3d pos;
+        public float damage;
+        public boolean isCrit;
+        public long spawnTime;
+
+        public DamageNumber(Vec3d pos, float damage, boolean isCrit) {
             this.pos = pos;
             this.damage = damage;
-            this.spawnTime = System.currentTimeMillis();
-        }
-    }
-
-    private static class HitParticle {
-        Vec3d pos;
-        long spawnTime;
-        HitParticle(Vec3d pos) {
-            this.pos = pos;
+            this.isCrit = isCrit;
             this.spawnTime = System.currentTimeMillis();
         }
     }
