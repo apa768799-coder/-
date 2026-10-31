@@ -5,9 +5,6 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.ChestBlockEntity;
-import net.minecraft.block.entity.EnderChestBlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
@@ -110,7 +107,6 @@ public class Modules {
     private Random random = new Random();
     private String lastLoggedState = "";
 
-    // ================== МЕТОД ДЛЯ ЗАГРУЗКИ КОНФИГА ==================
     public void copyFrom(Modules other) {
         this.autoMine = other.autoMine;
         this.autoFish = other.autoFish;
@@ -144,7 +140,6 @@ public class Modules {
         this.targetOreIndex = other.targetOreIndex;
     }
 
-    // ================== ПРОВЕРКА ДЛЯ X-RAY ==================
     public boolean isXrayBlock(BlockState state) {
         Block b = state.getBlock();
         if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA) return true;
@@ -671,7 +666,6 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
-    // ================== ОТРИСОВКА ВИЗУАЛОВ ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -724,16 +718,24 @@ public class Modules {
                 }
             }
 
-            // Chest ESP
+            // Chest ESP (ИСПРАВЛЕНО: Сканирование блоков вокруг игрока, а не blockEntities)
             if (chestESP && MinecraftClient.getInstance().world != null) {
-                for (BlockEntity be : MinecraftClient.getInstance().world.blockEntities) {
-                    if (be instanceof ChestBlockEntity || be instanceof EnderChestBlockEntity) {
-                        Box box = new Box(be.getPos()).expand(0.002);
-                        drawFullBox(matrices, lines, box, 1.0f, 0.5f, 0.0f, 1.0f);
-                        if (tracers) {
-                            Vec3d targetVec = Vec3d.ofCenter(be.getPos());
-                            lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
-                            lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
+                BlockPos pPos = MinecraftClient.getInstance().player.getBlockPos();
+                int radius = 20;
+                for (int x = -radius; x <= radius; x++) {
+                    for (int y = -radius; y <= radius; y++) {
+                        for (int z = -radius; z <= radius; z++) {
+                            BlockPos pos = pPos.add(x, y, z);
+                            Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
+                            if (b == Blocks.CHEST || b == Blocks.ENDER_CHEST || b == Blocks.TRAPPED_CHEST) {
+                                Box box = new Box(pos).expand(0.002);
+                                drawFullBox(matrices, lines, box, 1.0f, 0.5f, 0.0f, 1.0f);
+                                if (tracers) {
+                                    Vec3d targetVec = Vec3d.ofCenter(pos);
+                                    lines.vertex(matrices.peek().getPositionMatrix(), (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
+                                    lines.vertex(matrices.peek().getPositionMatrix(), (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.5f, 0.0f, 1.0f).normal(0, 1, 0);
+                                }
+                            }
                         }
                     }
                 }
