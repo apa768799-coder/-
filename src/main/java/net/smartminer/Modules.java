@@ -13,20 +13,22 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
-import net.minecraft.item.PickaxeItem;
+import net.minecraft.item.*;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import org.joml.Matrix4f;
 
 public class Modules {
     public boolean autoMine = false;
     public boolean autoFish = false;
     public boolean killAura = false;
+    public boolean fullBright = false;
+    public boolean antiAfk = false;
 
-    // 0 - Алмаз, 1 - Железо, 2 - Золото, 3 - Уголь, 4 - Изумруд
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
 
@@ -34,11 +36,9 @@ public class Modules {
     private int breakCooldown = 0;
     private int fishTimer = 0;
     private int attackCooldown = 0;
-    
-    // Для анти-застревания
     private int stuckTicks = 0;
+    private int afkTicks = 0;
     private Vec3d lastPos = Vec3d.ZERO;
-    private boolean jumping = false;
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
@@ -48,7 +48,28 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
-        // Умная еда
+        // FullBright
+        if (fullBright) client.options.getGamma().setValue(10.0);
+        else client.options.getGamma().setValue(1.0);
+
+        // AutoSprint
+        if (player.isOnGround() && player.input.movementForward > 0) {
+            player.setSprinting(true);
+        }
+
+        // Anti-AFK
+        if (antiAfk) {
+            afkTicks++;
+            if (afkTicks > 100) { // Каждые 5 секунд
+                player.setYaw(player.getYaw() + (float)(Math.random() * 4 - 2));
+                if (Math.random() > 0.5) client.options.jumpKey.setPressed(true);
+                afkTicks = 0;
+            } else {
+                client.options.jumpKey.setPressed(false);
+            }
+        }
+
+        // Умная еда и броня
         if (player.getHungerManager().getFoodLevel() < 15 && !player.getMainHandStack().isEmpty() && player.getMainHandStack().contains(DataComponentTypes.FOOD)) {
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             player.swingHand(Hand.MAIN_HAND);
@@ -67,6 +88,7 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
+        // Auto-Tool (Ищем кирку)
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -76,25 +98,14 @@ public class Modules {
             }
         }
 
-        // Умный обход препятствий (Анти-застревание)
         double moved = player.getPos().squaredDistanceTo(lastPos);
-        if (moved < 0.001 && targetBlock != null) {
-            stuckTicks++;
-        } else {
-            stuckTicks = 0;
-            jumping = false;
-            client.options.jumpKey.setPressed(false);
-            client.options.leftKey.setPressed(false);
-            client.options.rightKey.setPressed(false);
-        }
+        if (moved < 0.001 && targetBlock != null) stuckTicks++;
+        else stuckTicks = 0;
         lastPos = player.getPos();
 
-        if (stuckTicks > 10) {
-            if (!jumping) {
-                jumping = true;
-                client.options.jumpKey.setPressed(true);
-            }
-            if (stuckTicks % 10 == 0) {
+        if (stuckTicks > 15) {
+            client.options.jumpKey.setPressed(true);
+            if (stuckTicks % 20 == 0) {
                 client.options.leftKey.setPressed(!client.options.leftKey.isPressed());
                 client.options.rightKey.setPressed(!client.options.rightKey.isPressed());
             }
@@ -133,7 +144,7 @@ public class Modules {
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 25.0;
+        double bestDist = 30.0;
 
         Block t1 = switch (targetOreIndex) {
             case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
@@ -142,9 +153,9 @@ public class Modules {
             case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE; case 1 -> Blocks.DEEPSLATE_IRON_ORE; case 2 -> Blocks.DEEPSLATE_GOLD_ORE; case 3 -> Blocks.DEEPSLATE_COAL_ORE; default -> Blocks.DEEPSLATE_EMERALD_ORE;
         };
 
-        for (int x = -12; x <= 12; x++) {
-            for (int y = -12; y <= 12; y++) {
-                for (int z = -12; z <= 12; z++) {
+        for (int x = -15; x <= 15; x++) {
+            for (int y = -15; y <= 15; y++) {
+                for (int z = -15; z <= 15; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     Block b = client.world.getBlockState(pos).getBlock();
                     if (b == t1 || b == t2) {
@@ -157,7 +168,6 @@ public class Modules {
         return nearest;
     }
 
-    // ================== ВИЗУАЛЫ (ESP) ==================
     public void renderESP(WorldRenderContext context) {
         if (targetBlock == null) return;
         MatrixStack matrices = context.matrixStack();
@@ -171,8 +181,17 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            // Рисуем красную рамку (исправленный класс для 1.21.4)
-            VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+            VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); // Рамка вокруг руды
+
+            // Tracers (Линия от игрока к руде)
+            Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
+            Vec3d targetVec = Vec3d.ofCenter(targetBlock);
+            Matrix4f matrix = matrices.peek().getPositionMatrix();
+            
+            // Рисуем линию (красную)
+            VertexRendering.drawLine(matrices, lines, (float)eye.x, (float)eye.y, (float)eye.z, 
+                                     (float)targetVec.x, (float)targetVec.y, (float)targetVec.z, 
+                                     1.0f, 0.0f, 0.0f, 1.0f);
         }
         matrices.pop();
     }
@@ -198,11 +217,16 @@ public class Modules {
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (attackCooldown > 0) return;
         for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
-            if (entity instanceof MobEntity && entity.isAlive() && player.distanceTo(entity) < 3.5) {
+            if (entity instanceof MobEntity && entity.isAlive() && player.distanceTo(entity) < 3.8) {
                 lookAtEntity(player, entity);
-                client.interactionManager.attackEntity(player, entity);
-                player.swingHand(Hand.MAIN_HAND);
-                attackCooldown = 12; break;
+                if (player.isOnGround()) {
+                    client.options.jumpKey.setPressed(true);
+                } else {
+                    client.interactionManager.attackEntity(player, entity);
+                    player.swingHand(Hand.MAIN_HAND);
+                    attackCooldown = 12; 
+                }
+                break;
             }
         }
     }
@@ -216,8 +240,8 @@ public class Modules {
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 20.0f));
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 20.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 25.0f));
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 25.0f));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
@@ -226,7 +250,7 @@ public class Modules {
         double dist = Math.sqrt(dx * dx + dz * dz);
         float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
-        player.setYaw(targetYaw + (float)(Math.random()*2-1)); 
-        player.setPitch(targetPitch + (float)(Math.random()*2-1));
+        player.setYaw(targetYaw + (float)(Math.random()*3-1.5)); 
+        player.setPitch(targetPitch + (float)(Math.random()*3-1.5));
     }
 }
