@@ -55,6 +55,11 @@ public class Modules {
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
+    
+    // Для валидации цели и застревания
+    private int targetTimer = 0;
+    private int stuckTicks = 0;
+    private Vec3d lastPlayerPos = Vec3d.ZERO;
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
@@ -90,9 +95,9 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
-    // ================== НАДЕЖНЫЙ AUTOMINE (RAYCAST) ==================
+    // ================== УМНЫЙ AUTOMINE (С ВАЛИДАЦИЕЙ И СКАНИРОВАНИЕМ) ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // 1. Берем кирку
+        // 1. Проверяем кирку
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -102,16 +107,19 @@ public class Modules {
             }
         }
 
-        // 2. Собираем лут
+        // 2. Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
         if (targetItem != null) {
             currentState = "Сбор лута";
             double dist = player.getPos().distanceTo(targetItem.getPos());
+            float deltaYaw = Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, targetItem)));
+
             if (dist > 1.2) {
                 lookAtEntity(player, targetItem);
-                client.options.forwardKey.setPressed(true);
+                if (deltaYaw < 20) client.options.forwardKey.setPressed(true);
+                else client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
             } else {
                 client.options.forwardKey.setPressed(false);
@@ -119,77 +127,139 @@ public class Modules {
             return;
         }
 
-        // 3. Ищем руду
-        if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
-            currentState = "Поиск руды";
-            targetBlock = findNearestOre(client, player);
+        // 3. Валидация текущей цели (если блок исчез или это не руда - сбрасываем)
+        if (targetBlock != null) {
+            Block b = client.world.getBlockState(targetBlock).getBlock();
+            if (b == Blocks.AIR || !isTargetOre(b)) {
+                targetBlock = null;
+                targetTimer = 0;
+            }
         }
 
-        // 4. Идем и копаем
-        if (targetBlock != null) {
-            Vec3d eyePos = player.getEyePos();
-            Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
-            double dist = player.getPos().distanceTo(targetCenter);
-
-            // Если мы рядом - копаем руду
-            if (dist <= 4.5) {
-                currentState = "Добываю " + oreNames[targetOreIndex];
+        // 4. Поиск руды, если цели нет
+        if (targetBlock == null) {
+            targetBlock = findNearestOre(client, player);
+            
+            if (targetBlock == null) {
+                // Если руды нет - крутим головой на 360 градусов
+                currentState = "Сканирую местность";
                 client.options.forwardKey.setPressed(false);
                 client.options.jumpKey.setPressed(false);
-                lookAt(player, targetBlock);
-                
-                if (breakCooldown <= 0) {
-                    client.interactionManager.updateBlockBreakingProgress(targetBlock, Direction.UP);
-                    player.swingHand(Hand.MAIN_HAND);
-                    breakCooldown = 2; 
-                }
+                player.setYaw(player.getYaw() + 15.0f); // Крутим камеру
                 return;
-            }
-
-            // Если далеко - строим прямой путь (луч)
-            BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            BlockPos hitBlock = hit.getBlockPos();
-
-            // Если луч уперся в стену (не в руду)
-            if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
-                currentState = "Копаю стену";
-                client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false);
-                lookAt(player, hitBlock); // Смотрим на стену
-                
-                if (breakCooldown <= 0) {
-                    client.interactionManager.updateBlockBreakingProgress(hitBlock, Direction.UP);
-                    player.swingHand(Hand.MAIN_HAND);
-                    breakCooldown = 2; 
-                }
-                return;
-            }
-
-            // Если путь свободен - идем к руде
-            currentState = "Иду к руде";
-            lookAt(player, targetBlock);
-            client.options.forwardKey.setPressed(true);
-
-            // Прыгаем ТОЛЬКО если уперлись в ступеньку высотой 1 блок
-            if (player.horizontalCollision) {
-                BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-                if (!client.world.getBlockState(front).isAir() && client.world.getBlockState(front.up()).isAir() && client.world.getBlockState(front.up(2)).isAir()) {
-                    if (player.isOnGround()) client.options.jumpKey.setPressed(true);
-                } else {
-                    client.options.jumpKey.setPressed(false);
-                }
             } else {
-                client.options.jumpKey.setPressed(false);
+                targetTimer = 0; // Сбрасываем таймер для новой цели
             }
+        }
 
+        // 5. Если цель есть - идем к ней
+        double dist = player.getPos().distanceTo(Vec3d.ofCenter(targetBlock));
+
+        // Проверка на застревание (если мы жмем W, но не двигаемся)
+        if (player.getPos().distanceTo(lastPlayerPos) < 0.05 && dist > 4.5) {
+            stuckTicks++;
+            if (stuckTicks > 40) { // 2 секунды застоя
+                currentState = "Не могу пройти, отмена";
+                targetBlock = null;
+                stuckTicks = 0;
+                return;
+            }
         } else {
-            currentState = "Руды нет, иду вперед";
-            client.options.forwardKey.setPressed(true);
+            stuckTicks = 0;
+        }
+        lastPlayerPos = player.getPos();
+
+        // Таймаут цели (если не дошли за 30 секунд - ищем другую)
+        targetTimer++;
+        if (targetTimer > 600) { 
+            targetBlock = null;
+            targetTimer = 0;
+            return;
+        }
+
+        // Если мы близко - копаем
+        if (dist <= 4.5) {
+            currentState = "Добываю " + oreNames[targetOreIndex];
+            client.options.forwardKey.setPressed(false);
+            client.options.jumpKey.setPressed(false);
+            lookAt(player, targetBlock);
+            
+            if (breakCooldown <= 0) {
+                client.interactionManager.updateBlockBreakingProgress(targetBlock, Direction.UP);
+                player.swingHand(Hand.MAIN_HAND);
+                breakCooldown = 2; 
+            }
+            return;
+        }
+
+        // Если далеко - идем
+        float targetYaw = getYawToBlock(player, targetBlock);
+        float deltaYaw = Math.abs(MathHelper.wrapDegrees(player.getYaw() - targetYaw));
+
+        lookAt(player, targetBlock);
+
+        if (deltaYaw > 15.0f) {
+            // Смотрим не туда - стоим на месте
+            currentState = "Поворот к руде (" + (int)deltaYaw + "°)";
+            client.options.forwardKey.setPressed(false);
+            client.options.jumpKey.setPressed(false);
+            return;
+        }
+
+        // Проверяем путь (нет ли стены)
+        Vec3d eyePos = player.getEyePos();
+        Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
+        BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+        BlockPos hitBlock = hit.getBlockPos();
+
+        if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
+            currentState = "Копаю стену к руде";
+            client.options.forwardKey.setPressed(false);
+            client.options.jumpKey.setPressed(false);
+            lookAt(player, hitBlock);
+            
+            if (breakCooldown <= 0) {
+                client.interactionManager.updateBlockBreakingProgress(hitBlock, Direction.UP);
+                player.swingHand(Hand.MAIN_HAND);
+                breakCooldown = 2; 
+            }
+            return;
+        }
+
+        // Путь свободен - идем
+        currentState = "Иду к руде";
+        client.options.forwardKey.setPressed(true);
+
+        if (player.horizontalCollision && player.isOnGround()) {
+            client.options.jumpKey.setPressed(true);
+        } else {
             client.options.jumpKey.setPressed(false);
         }
     }
 
-    // ================== ОСТАЛЬНОЕ ==================
+    private boolean isTargetOre(Block b) {
+        Block t1 = switch (targetOreIndex) {
+            case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
+        };
+        Block t2 = switch (targetOreIndex) {
+            case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE; case 1 -> Blocks.DEEPSLATE_IRON_ORE; case 2 -> Blocks.DEEPSLATE_GOLD_ORE; case 3 -> Blocks.DEEPSLATE_COAL_ORE; default -> Blocks.DEEPSLATE_EMERALD_ORE;
+        };
+        return b == t1 || b == t2;
+    }
+
+    // ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==================
+    private float getYawToBlock(ClientPlayerEntity player, BlockPos pos) {
+        double dx = pos.getX() + 0.5 - player.getX();
+        double dz = pos.getZ() + 0.5 - player.getZ();
+        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
+    }
+
+    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
+        double dx = entity.getX() - player.getX();
+        double dz = entity.getZ() - player.getZ();
+        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
+    }
+
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
@@ -327,12 +397,6 @@ public class Modules {
                 }
             }
         }
-    }
-
-    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
-        double dx = entity.getX() - player.getX();
-        double dz = entity.getZ() - player.getZ();
-        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
     }
 
     public void renderESP(WorldRenderContext context) {
