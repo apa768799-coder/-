@@ -59,15 +59,13 @@ public class Modules {
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
-    private int escapeTicks = 0; // Таймер отступления
+    private int escapeTicks = 0;
     
     private int targetTimer = 0;
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
-    private Vec3d lastPlayerPos = Vec3d.ZERO;
-    private int stuckTicks = 0;
-
+    
     private Random random = new Random();
     private String lastLoggedState = "";
 
@@ -79,17 +77,15 @@ public class Modules {
         }
     }
 
-    // МЕТОД ДЛЯ РАЗВОРОТА И ОТСТУПЛЕНИЯ
     public void triggerRetreat() {
-        this.escapeTicks = 40; // 2 секунды идем в другую сторону
+        this.escapeTicks = 40; 
         this.targetBlock = null;
         this.currentlyBreaking = null;
         this.breakStuckTicks = 0;
         
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player != null) {
-            // Резко разворачиваемся на 180 градусов
-            player.setYaw(player.getYaw() + 180.0f);
+            player.setYaw(player.getYaw() + 180.0f); 
         }
     }
 
@@ -150,18 +146,21 @@ public class Modules {
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // === ЛОГИКА ОТСТУПЛЕНИЯ ОТ ПРИВАТА ===
         if (escapeTicks > 0) {
             escapeTicks--;
             updateState("Отступаю от привата...");
-            client.options.forwardKey.setPressed(true); // Идем ВПЕРЕД (т.к. мы развернулись)
+            client.options.forwardKey.setPressed(true); 
             client.options.backKey.setPressed(false);
             client.options.jumpKey.setPressed(false);
             return;
         }
 
         // Проверка на полный инвентарь
-        if (player.getInventory().getEmptySlot() == -1) {
+        int emptySlots = 0;
+        for (int i = 0; i < 36; i++) {
+            if (player.getInventory().getStack(i).isEmpty()) emptySlots++;
+        }
+        if (emptySlots == 0) {
             autoMine = false;
             updateState("Инвентарь полон! Выключаю AutoMine");
             return;
@@ -176,6 +175,36 @@ public class Modules {
             }
         }
 
+        // ==========================================
+        // 1. СНАЧАЛА СОБИРАЕМ ЛУТ (Приоритет)
+        // ==========================================
+        if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
+            targetItem = findNearestItem(client, player);
+        }
+
+        if (targetItem != null) {
+            updateState("Сбор лута");
+            double dist = player.getPos().distanceTo(targetItem.getPos());
+            if (dist > 1.2) {
+                lookAtEntity(player, targetItem);
+                client.options.forwardKey.setPressed(true);
+                client.options.jumpKey.setPressed(false);
+                
+                // Если застряли на пути к луту, прыгаем
+                if (player.horizontalCollision && player.isOnGround()) {
+                    client.options.jumpKey.setPressed(true);
+                }
+            } else {
+                // Подошли близко, игра сама подберет предмет
+                client.options.forwardKey.setPressed(false);
+                client.options.jumpKey.setPressed(false);
+            }
+            return; // ВАЖНО: Пока не соберем лут, руду не ищем!
+        }
+
+        // ==========================================
+        // 2. ПОТОМ ИЩЕМ И КОПАЕМ РУДУ
+        // ==========================================
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
@@ -257,21 +286,6 @@ public class Modules {
             return;
         }
 
-        if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
-            targetItem = findNearestItem(client, player);
-        }
-        if (targetItem != null) {
-            updateState("Сбор лута");
-            double dist = player.getPos().distanceTo(targetItem.getPos());
-            if (dist > 1.2) {
-                lookAtEntity(player, targetItem);
-                client.options.forwardKey.setPressed(true);
-            } else {
-                client.options.forwardKey.setPressed(false);
-            }
-            return;
-        }
-
         updateState("Руд нет, копаю туннель");
         BlockPos tunnelFront = player.getBlockPos().offset(player.getHorizontalFacing());
         if (client.world.getBlockState(tunnelFront.down()).getBlock() == Blocks.LAVA) {
@@ -300,11 +314,11 @@ public class Modules {
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            if (breakStuckTicks > 100) { // Если не сломали за 5 сек - это приват
+            if (breakStuckTicks > 100) { 
                 updateState("Приват! Разворот");
                 blacklistedBlocks.put(pos, System.currentTimeMillis()); 
                 if (targetBlock != null) blacklistedBlocks.put(targetBlock, System.currentTimeMillis()); 
-                triggerRetreat(); // Вызываем разворот и отступление!
+                triggerRetreat(); 
                 return;
             }
         } else {
@@ -345,8 +359,9 @@ public class Modules {
         return nearest;
     }
 
+    // ИСПРАВЛЕНО: Радиус поиска лута увеличен до 5 блоков
     private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
-        return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(3.0), 
+        return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(5.0), 
             e -> e.isAlive() && !e.getStack().isEmpty())
             .stream()
             .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
@@ -414,7 +429,7 @@ public class Modules {
                 ItemStack stack = player.getInventory().getStack(i);
                 if (stack.getItem() instanceof BlockItem) {
                     if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
-                    BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below).add(0, 0.5, 0), Direction.UP, below, false);
+                    BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(below), Direction.UP, below, false);
                     client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
                     player.swingHand(Hand.MAIN_HAND);
                     return;
