@@ -54,7 +54,7 @@ public class Modules {
     public boolean noFall = false;
     public boolean autoRespawn = false;
     public boolean sprint = false;
-    public boolean fastPlace = false;
+    public boolean fastPlace = false; // Оставляем кнопку в меню, но логика отключена
     public boolean playerESP = false;
     public boolean xray = false;
 
@@ -140,7 +140,8 @@ public class Modules {
         }
 
         if (noFall && player.fallDistance > 2.0f) player.fallDistance = 0.0f; 
-        if (fastPlace && client.options.useKey.isPressed()) client.itemUseCooldown = 0; 
+
+        // FastPlace логика убрана из-за ошибки доступа
 
         if (player.getHungerManager().getFoodLevel() < 15) {
             doAutoEat(client, player);
