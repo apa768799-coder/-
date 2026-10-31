@@ -64,10 +64,8 @@ public class SmartClient implements ClientModInitializer {
             
             active.sort(Comparator.comparingInt(String::length).reversed());
 
-            // Водяной знак
             context.drawTextWithShadow(client.textRenderer, "§l§bSMART §fCLIENT §7v25", 8, 8, 0xFFFFFF);
 
-            // Список модулей
             for (String mod : active) {
                 int width = client.textRenderer.getWidth(mod);
                 int x = screenWidth - width - 8;
