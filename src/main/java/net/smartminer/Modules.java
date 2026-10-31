@@ -190,6 +190,7 @@ public class Modules {
         }
     }
 
+    // ================== ИСПРАВЛЕННЫЙ AUTOMINE (БЕЗ ТУПНЯКОВ) ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
         if (escapeTicks > 0) {
             escapeTicks--;
@@ -219,6 +220,7 @@ public class Modules {
             }
         }
 
+        // 1. Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
@@ -242,13 +244,15 @@ public class Modules {
             }
         }
 
+        // 2. Поиск руды
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
             targetTimer = 0;
-            if (targetBlock != null) SmartClient.addLog("Найдена цель: " + oreNames[targetOreIndex]);
+            if (targetBlock != null) SmartClient.addLog("Цель: " + oreNames[targetOreIndex]);
         }
 
+        // 3. Движение и копание
         if (targetBlock != null) {
             targetTimer++;
             if (targetTimer > 600) { 
@@ -262,6 +266,7 @@ public class Modules {
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
+            // Если в зоне досягаемости - копаем
             if (dist <= 4.0) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
@@ -278,83 +283,84 @@ public class Modules {
                 return;
             }
 
+            // Умное движение (Лестницы)
             int dy = targetBlock.getY() - player.getBlockPos().getY();
             
             if (dy >= 2) {
-                updateState("Копаю лестницу ВВЕРХ");
+                updateState("Ступенька ВВЕРХ");
                 BlockPos upFront = player.getBlockPos().offset(player.getHorizontalFacing()).up();
                 lookAt(player, upFront);
                 breakBlock(client, player, upFront);
-                if (client.world.getBlockState(upFront).isAir() && player.horizontalCollision) client.options.jumpKey.setPressed(true);
+                if (client.world.getBlockState(upFront).isAir() && player.horizontalCollision) {
+                    client.options.jumpKey.setPressed(true);
+                }
                 return;
             }
             
             if (dy <= -2) {
-                updateState("Копаю лестницу ВНИЗ");
-                BlockPos downFront = player.getBlockPos().offset(player.getHorizontalFacing()).down();
-                lookAt(player, downFront);
-                breakBlock(client, player, downFront);
-                if (client.world.getBlockState(downFront).isAir()) client.options.forwardKey.setPressed(true);
+                updateState("Ступенька ВНИЗ");
+                BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
+                lookAt(player, front);
+                breakBlock(client, player, front);
+                if (client.world.getBlockState(front).isAir()) client.options.forwardKey.setPressed(true);
                 return;
             }
 
+            // РУДА НА ОДНОМ УРОВНЕ (ИСПРАВЛЕНИЕ БАГА)
             updateState("Иду к руде");
             lookAt(player, targetBlock);
 
             BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
-            if (client.world.getBlockState(front.down()).isAir() || client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
-                updateState("Опасность! Отмена");
+            BlockPos frontUp = front.up();
+
+            // Проверка на лаву впереди
+            if (client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
+                updateState("Лава! Отмена");
                 blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                 targetBlock = null;
                 return;
             }
 
-            BlockHitResult hit = client.world.raycast(new RaycastContext(eyePos, targetCenter, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            BlockPos hitBlock = hit.getBlockPos();
-
-            if (!hitBlock.equals(targetBlock) && !client.world.getBlockState(hitBlock).isAir()) {
-                updateState("Копаю прямой путь");
+            // Если впереди стена - ломаем её (не прыгаем)
+            if (!client.world.getBlockState(front).isAir() || !client.world.getBlockState(frontUp).isAir()) {
+                updateState("Копаю путь");
                 client.options.forwardKey.setPressed(false);
-                lookAt(player, hitBlock); 
-                breakBlock(client, player, hitBlock);
+                client.options.jumpKey.setPressed(false);
+                
+                BlockPos breakTarget = !client.world.getBlockState(front).isAir() ? front : frontUp;
+                lookAt(player, breakTarget);
+                breakBlock(client, player, breakTarget);
                 return;
             }
 
+            // Путь свободен - идем
             client.options.forwardKey.setPressed(true);
             
-            if (player.getPos().distanceTo(lastPos) < 0.05) {
-                stuckTicks++;
-                if (stuckTicks > 20) {
-                    strafeTicks = 10;
-                    strafeLeft = random.nextBoolean();
-                    client.options.jumpKey.setPressed(true);
-                }
-            } else stuckTicks = 0;
-            lastPos = player.getPos();
-
-            if (strafeTicks > 0) {
-                if (strafeLeft) client.options.leftKey.setPressed(true);
-                else client.options.rightKey.setPressed(true);
+            // Прыгаем ТОЛЬКО если это ступенька высотой 1 блок (уперлись, но впереди воздух)
+            if (player.horizontalCollision && player.isOnGround() && client.world.getBlockState(front).isAir()) {
+                client.options.jumpKey.setPressed(true);
             } else {
-                client.options.leftKey.setPressed(false);
-                client.options.rightKey.setPressed(false);
+                client.options.jumpKey.setPressed(false);
             }
             return;
         }
 
+        // Туннель, если руды нет
         updateState("Руд нет, копаю туннель");
         BlockPos tunnelFront = player.getBlockPos().offset(player.getHorizontalFacing());
+        BlockPos tunnelFrontUp = tunnelFront.up();
+
         if (client.world.getBlockState(tunnelFront.down()).getBlock() == Blocks.LAVA) {
             player.setYaw(player.getYaw() + 90.0f); 
             return;
         }
 
-        if (!client.world.getBlockState(tunnelFront).isAir() && !blacklistedBlocks.containsKey(tunnelFront)) {
+        if (!client.world.getBlockState(tunnelFront).isAir()) {
             lookAt(player, tunnelFront);
             breakBlock(client, player, tunnelFront);
-        } else if (!client.world.getBlockState(tunnelFront.up()).isAir() && !blacklistedBlocks.containsKey(tunnelFront.up())) {
-            lookAt(player, tunnelFront.up());
-            breakBlock(client, player, tunnelFront.up());
+        } else if (!client.world.getBlockState(tunnelFrontUp).isAir()) {
+            lookAt(player, tunnelFrontUp);
+            breakBlock(client, player, tunnelFrontUp);
         } else {
             client.options.forwardKey.setPressed(true);
         }
@@ -578,7 +584,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
-    // ================== КРАСИВЫЙ 3D CORNER ESP ==================
+    // ================== КРАСИВЫЕ ВИЗУАЛЫ (3D CORNER ESP) ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -626,14 +632,12 @@ public class Modules {
         matrices.pop();
     }
 
-    // МЕТОД ДЛЯ ОТРИСОВКИ 3D УГОЛКОВ (CORNER ESP)
     private void drawCornerBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) {
         Matrix4f matrix = matrices.peek().getPositionMatrix();
         float x1 = (float) box.minX, y1 = (float) box.minY, z1 = (float) box.minZ;
         float x2 = (float) box.maxX, y2 = (float) box.maxY, z2 = (float) box.maxZ;
-        float len = (x2 - x1) * 0.25f; // Длина уголка (25% от размера блока)
+        float len = (x2 - x1) * 0.25f; 
 
-        // Нижние 4 угла
         lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1 + len, y1, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
@@ -654,7 +658,6 @@ public class Modules {
         lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x2, y1, z2 - len).color(r, g, b, a).normal(0, 1, 0);
 
-        // Верхние 4 угла
         lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1 + len, y2, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
@@ -675,7 +678,6 @@ public class Modules {
         lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x2, y2, z2 - len).color(r, g, b, a).normal(0, 1, 0);
 
-        // Вертикальные линии (стойки)
         lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1, y1 + len, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
@@ -686,7 +688,6 @@ public class Modules {
         lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x2, y1 + len, z2).color(r, g, b, a).normal(0, 1, 0);
         
-        // Верхние вертикальные
         lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x1, y2 - len, z1).color(r, g, b, a).normal(0, 1, 0);
         lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
