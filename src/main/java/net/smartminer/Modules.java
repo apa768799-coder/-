@@ -1,5 +1,6 @@
 package net.smartminer;
 
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -7,6 +8,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.mob.MobEntity;
@@ -16,6 +18,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 public class Modules {
@@ -23,16 +26,19 @@ public class Modules {
     public boolean autoFish = false;
     public boolean killAura = false;
 
-    // Выбор руды (0 - Алмаз, 1 - Железо, 2 - Золото, 3 - Уголь, 4 - Изумруд)
+    // 0 - Алмаз, 1 - Железо, 2 - Золото, 3 - Уголь, 4 - Изумруд
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
 
-    private BlockPos targetBlock = null;
+    public BlockPos targetBlock = null;
     private int breakCooldown = 0;
     private int fishTimer = 0;
     private int attackCooldown = 0;
-    private int stuckTimer = 0;
+    
+    // Переменные для Анти-Застревания
+    private int stuckTicks = 0;
     private Vec3d lastPos = Vec3d.ZERO;
+    private boolean jumping = false;
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
@@ -42,7 +48,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
 
-        // Умная еда (если голод < 15)
+        // Умная еда
         if (player.getHungerManager().getFoodLevel() < 15 && !player.getMainHandStack().isEmpty() && player.getMainHandStack().contains(DataComponentTypes.FOOD)) {
             client.interactionManager.interactItem(player, Hand.MAIN_HAND);
             player.swingHand(Hand.MAIN_HAND);
@@ -71,22 +77,41 @@ public class Modules {
             }
         }
 
-        // Анти-застревание (если не двигались 20 тиков)
-        if (player.getPos().squaredDistanceTo(lastPos) < 0.1 && targetBlock != null) {
-            stuckTimer++;
-            if (stuckTimer > 20) {
-                client.options.jumpKey.setPressed(true);
-                client.options.sneakKey.setPressed(true);
-                if (stuckTimer > 40) { stuckTimer = 0; targetBlock = null; } // Сброс цели
-            }
+        // ================= ЛОГИКА АНТИ-ЗАСТРЕВАНИЯ =================
+        double moved = player.getPos().squaredDistanceTo(lastPos);
+        if (moved < 0.001) {
+            stuckTicks++;
         } else {
-            stuckTimer = 0;
+            stuckTicks = 0;
+            jumping = false;
             client.options.jumpKey.setPressed(false);
-            client.options.sneakKey.setPressed(false);
         }
         lastPos = player.getPos();
 
-        // Поиск цели
+        if (stuckTicks > 10 && targetBlock != null) {
+            // Если застряли - начинаем прыгать и копать впереди себя
+            if (!jumping) {
+                jumping = true;
+                client.options.jumpKey.setPressed(true);
+            }
+            
+            // Раз в полсекунды дергаемся в сторону (стрейф)
+            if (stuckTicks % 10 == 0) {
+                client.options.leftKey.setPressed(!client.options.leftKey.isPressed());
+                client.options.rightKey.setPressed(!client.options.rightKey.isPressed());
+            }
+
+            // И ломаем блок прямо перед носом, чтобы прокопать путь
+            BlockPos frontBlock = player.getBlockPos().offset(player.getHorizontalFacing());
+            if (!client.world.getBlockState(frontBlock).isAir() && breakCooldown <= 0) {
+                client.interactionManager.updateBlockBreakingProgress(frontBlock, Direction.UP);
+                player.swingHand(Hand.MAIN_HAND);
+                breakCooldown = 2;
+            }
+            return; // Пока выбираемся, не ищем новую цель
+        }
+        // ============================================================
+
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             targetBlock = findNearestOre(client, player);
         }
@@ -106,7 +131,7 @@ public class Modules {
                 }
             }
         } else {
-            // Если руды нет, просто идем вперед
+            // Ищем руду (если нет - просто идем)
             client.options.forwardKey.setPressed(true);
         }
     }
@@ -114,30 +139,21 @@ public class Modules {
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
-        double bestDist = 20.0; // Радиус поиска (20 блоков)
+        double bestDist = 25.0; // Радиус 25 блоков (видит далеко)
 
-        // Выбираем блоки в зависимости от индекса
-        Block targetBlockType = switch (targetOreIndex) {
-            case 0 -> Blocks.DIAMOND_ORE;
-            case 1 -> Blocks.IRON_ORE;
-            case 2 -> Blocks.GOLD_ORE;
-            case 3 -> Blocks.COAL_ORE;
-            default -> Blocks.EMERALD_ORE;
+        Block t1 = switch (targetOreIndex) {
+            case 0 -> Blocks.DIAMOND_ORE; case 1 -> Blocks.IRON_ORE; case 2 -> Blocks.GOLD_ORE; case 3 -> Blocks.COAL_ORE; default -> Blocks.EMERALD_ORE;
         };
-        Block targetDeepslateType = switch (targetOreIndex) {
-            case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE;
-            case 1 -> Blocks.DEEPSLATE_IRON_ORE;
-            case 2 -> Blocks.DEEPSLATE_GOLD_ORE;
-            case 3 -> Blocks.DEEPSLATE_COAL_ORE;
-            default -> Blocks.DEEPSLATE_EMERALD_ORE;
+        Block t2 = switch (targetOreIndex) {
+            case 0 -> Blocks.DEEPSLATE_DIAMOND_ORE; case 1 -> Blocks.DEEPSLATE_IRON_ORE; case 2 -> Blocks.DEEPSLATE_GOLD_ORE; case 3 -> Blocks.DEEPSLATE_COAL_ORE; default -> Blocks.DEEPSLATE_EMERALD_ORE;
         };
 
-        for (int x = -8; x <= 8; x++) {
-            for (int y = -8; y <= 8; y++) {
-                for (int z = -8; z <= 8; z++) {
+        for (int x = -10; x <= 10; x++) {
+            for (int y = -10; y <= 10; y++) {
+                for (int z = -10; z <= 10; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     Block b = client.world.getBlockState(pos).getBlock();
-                    if (b == targetBlockType || b == targetDeepslateType) {
+                    if (b == t1 || b == t2) {
                         double d = pPos.getSquaredDistance(pos);
                         if (d < bestDist) { bestDist = d; nearest = pos; }
                     }
@@ -148,29 +164,27 @@ public class Modules {
     }
 
     // ================== ВИЗУАЛЫ (ESP) ==================
-    public void renderESP(net.minecraft.client.render.WorldRenderContext context) {
+    public void renderESP(WorldRenderContext context) {
         if (targetBlock == null) return;
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
-
-        VertexConsumerProvider consumers = context.consumers();
-        if (consumers == null) return;
 
         Vec3d camPos = context.camera().getPos();
         matrices.push();
         matrices.translate(-camPos.x, -camPos.y, -camPos.z);
 
-        // Рисуем рамку вокруг блока
         Box box = new Box(targetBlock).expand(0.002);
+        VertexConsumerProvider.Immediate consumers = MinecraftClient.getInstance().getBufferBuilders().getEntityVertexConsumers();
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
         
-        // Рамка (красный цвет)
-        net.minecraft.client.render.WorldRenderer.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+        // Рисуем красную рамку вокруг блока
+        WorldRenderer.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
         
+        consumers.draw();
         matrices.pop();
     }
 
-    // ================== ОСТАЛЬНЫЕ МОДУЛИ ==================
+    // ================== РЫБАЛКА И КОМБАТ ==================
     private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {
         FishingBobberEntity hook = null;
         for (net.minecraft.entity.Entity e : client.world.getEntities()) {
@@ -201,7 +215,6 @@ public class Modules {
         }
     }
 
-    // Плавный поворот камеры
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
         Vec3d target = Vec3d.ofCenter(pos);
         Vec3d eye = player.getEyePos();
@@ -209,7 +222,7 @@ public class Modules {
         double dist = Math.sqrt(dx * dx + dz * dz);
         float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
-        float dYaw = Math.floorMod((int) (targetYaw - player.getYaw() + 180), 360) - 180;
+        float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 20.0f));
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 20.0f));
