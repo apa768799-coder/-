@@ -9,7 +9,6 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
@@ -263,7 +262,6 @@ public class Modules {
             Vec3d targetCenter = Vec3d.ofCenter(targetBlock);
             double dist = player.getPos().distanceTo(targetCenter);
 
-            // Проверка дистанции: копаем только если ближе 4.0 блоков (античит-безопасно)
             if (dist <= 4.0) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
@@ -362,7 +360,6 @@ public class Modules {
         }
     }
 
-    // === ИСПРАВЛЕННОЕ КОПАНИЕ (БЕЗ GHOST BLOCK) ===
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         Block b = client.world.getBlockState(pos).getBlock();
         if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
@@ -372,7 +369,6 @@ public class Modules {
 
         if (pos.equals(currentlyBreaking)) {
             breakStuckTicks++;
-            // Если блок не ломается 5 секунд (100 тиков), значит это приват или баг
             if (breakStuckTicks > 100) { 
                 updateState("Приват! Разворот");
                 blacklistedBlocks.put(pos, System.currentTimeMillis()); 
@@ -385,17 +381,8 @@ public class Modules {
             breakStuckTicks = 0;
         }
 
-        // 1. Копаем КАЖДЫЙ ТИК (как зажатая ЛКМ)
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-        
-        // 2. Синхронизируем руку каждый тик (античит видит нормальную анимацию)
         player.swingHand(Hand.MAIN_HAND);
-        
-        // 3. Если мы копаем и камера смотрит не на блок, сбрасываем (античит спалит)
-        if (!client.crosshairTarget.getType().equals(HitResult.Type.BLOCK)) {
-            currentlyBreaking = null;
-            breakStuckTicks = 0;
-        }
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
@@ -591,6 +578,7 @@ public class Modules {
         if (fishTimer > 0) fishTimer--;
     }
 
+    // ================== КРАСИВЫЙ 3D CORNER ESP ==================
     public void renderESP(WorldRenderContext context) {
         MatrixStack matrices = context.matrixStack();
         if (matrices == null) return;
@@ -602,36 +590,112 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            
+            Vec3d eye = MinecraftClient.getInstance().player != null ? MinecraftClient.getInstance().player.getEyePos() : camPos;
+
             if (xray) {
                 for (BlockPos pos : xrayBlocks) {
+                    Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
+                    float r = 1.0f, g = 1.0f, bl = 1.0f;
+
+                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE) { r = 0.0f; g = 1.0f; bl = 1.0f; } 
+                    else if (b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE) { r = 0.0f; g = 1.0f; bl = 0.0f; } 
+                    else if (b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE) { r = 1.0f; g = 1.0f; bl = 0.0f; } 
+                    else if (b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE) { r = 0.6f; g = 0.6f; bl = 0.6f; } 
+                    else if (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE) { r = 0.0f; g = 0.0f; bl = 1.0f; } 
+                    else if (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) { r = 1.0f; g = 0.0f; bl = 0.0f; } 
+
                     Box box = new Box(pos).expand(0.002);
-                    VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f);
+                    drawCornerBox(matrices, lines, box, r, g, bl, 1.0f);
                 }
             }
 
             if (targetBlock != null) {
-                Box box = new Box(targetBlock).expand(0.002);
-                VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
-                if (MinecraftClient.getInstance().player != null) {
-                    Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
-                    Vec3d targetVec = Vec3d.ofCenter(targetBlock);
-                    Matrix4f matrix = matrices.peek().getPositionMatrix();
-                    lines.vertex(matrix, (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
-                    lines.vertex(matrix, (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
-                }
+                Box box = new Box(targetBlock).expand(0.005);
+                drawCornerBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
             }
 
             if (playerESP && MinecraftClient.getInstance().world != null) {
                 for (net.minecraft.entity.player.PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
                     if (p != MinecraftClient.getInstance().player) {
                         Box box = p.getBoundingBox().expand(0.1);
-                        VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+                        drawCornerBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
                     }
                 }
             }
         }
         matrices.pop();
+    }
+
+    // МЕТОД ДЛЯ ОТРИСОВКИ 3D УГОЛКОВ (CORNER ESP)
+    private void drawCornerBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) {
+        Matrix4f matrix = matrices.peek().getPositionMatrix();
+        float x1 = (float) box.minX, y1 = (float) box.minY, z1 = (float) box.minZ;
+        float x2 = (float) box.maxX, y2 = (float) box.maxY, z2 = (float) box.maxZ;
+        float len = (x2 - x1) * 0.25f; // Длина уголка (25% от размера блока)
+
+        // Нижние 4 угла
+        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1 + len, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2 - len, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1 + len, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1, z2 - len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2 - len, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z2 - len).color(r, g, b, a).normal(0, 1, 0);
+
+        // Верхние 4 угла
+        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1 + len, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2 - len, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z1 + len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1 + len, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2, z2 - len).color(r, g, b, a).normal(0, 1, 0);
+
+        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2 - len, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z2 - len).color(r, g, b, a).normal(0, 1, 0);
+
+        // Вертикальные линии (стойки)
+        lines.vertex(matrix, x1, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1 + len, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1 + len, z1).color(r, g, b, a).normal(0, 1, 0);
+        
+        lines.vertex(matrix, x1, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y1 + len, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y1 + len, z2).color(r, g, b, a).normal(0, 1, 0);
+        
+        // Верхние вертикальные
+        lines.vertex(matrix, x1, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2 - len, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z1).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2 - len, z1).color(r, g, b, a).normal(0, 1, 0);
+        
+        lines.vertex(matrix, x1, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x1, y2 - len, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2, z2).color(r, g, b, a).normal(0, 1, 0);
+        lines.vertex(matrix, x2, y2 - len, z2).color(r, g, b, a).normal(0, 1, 0);
     }
 
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
