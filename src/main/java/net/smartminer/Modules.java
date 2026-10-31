@@ -32,8 +32,10 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
@@ -47,6 +49,14 @@ public class Modules {
     public boolean scaffold = false;
     public boolean velocity = false;
     public boolean chestStealer = false;
+    
+    public boolean autoTotem = false;
+    public boolean noFall = false;
+    public boolean autoRespawn = false;
+    public boolean sprint = false;
+    public boolean fastPlace = false;
+    public boolean playerESP = false;
+    public boolean xray = false;
 
     public int targetOreIndex = 0;
     public String[] oreNames = {"Алмаз", "Железо", "Золото", "Уголь", "Изумруд"};
@@ -55,22 +65,30 @@ public class Modules {
     public BlockPos targetBlock = null;
     private ItemEntity targetItem = null;
     private BlockPos targetChest = null;
+    
+    public LivingEntity killAuraTarget = null;
+
+    private List<BlockPos> xrayBlocks = new ArrayList<>();
+    private int xrayTimer = 0;
 
     private int fishTimer = 0;
     private int attackCooldown = 0;
     private int afkTicks = 0;
     private int escapeTicks = 0;
+    private int actionDelay = 0;
     
     private int targetTimer = 0;
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
     
+    private int stuckTicks = 0;
+    private Vec3d lastPos = Vec3d.ZERO;
+    private int strafeTicks = 0;
+    private boolean strafeLeft = false;
+
     private Random random = new Random();
     private String lastLoggedState = "";
-
-    // ЧЕЛОВЕЧЕСКИЕ ПАУЗЫ
-    private int actionDelay = 0;
 
     private void updateState(String newState) {
         this.currentState = newState;
@@ -85,12 +103,8 @@ public class Modules {
         this.targetBlock = null;
         this.currentlyBreaking = null;
         this.breakStuckTicks = 0;
-        
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
-        if (player != null) {
-            // Вместо резкого разворота, начинаем медленно поворачиваться (это сделает lookAt)
-            this.targetBlock = player.getBlockPos().offset(player.getHorizontalFacing().getOpposite(), 10);
-        }
+        if (player != null) player.setYaw(player.getYaw() + 180.0f + (float)(Math.random() * 30 - 15)); 
     }
 
     public void onTick(MinecraftClient client) {
@@ -99,10 +113,19 @@ public class Modules {
 
         if (fishTimer > 0) fishTimer--;
         if (attackCooldown > 0) attackCooldown--;
-        if (actionDelay > 0) { actionDelay--; return; } // Пауза "человека"
+        if (actionDelay > 0) { actionDelay--; return; }
+        if (strafeTicks > 0) strafeTicks--;
 
         long currentTime = System.currentTimeMillis();
         blacklistedBlocks.entrySet().removeIf(entry -> currentTime - entry.getValue() > 20000);
+
+        if (xray) {
+            xrayTimer++;
+            if (xrayTimer >= 20) { 
+                updateXrayBlocks(client, player);
+                xrayTimer = 0;
+            }
+        }
 
         if (fullBright) client.options.getGamma().setValue(10.0);
         else client.options.getGamma().setValue(1.0);
@@ -112,7 +135,12 @@ public class Modules {
             player.setVelocity(vel.x * 0.2, vel.y, vel.z * 0.2);
         }
 
-        if (player.isOnGround() && player.input.movementForward > 0) player.setSprinting(true);
+        if (sprint && player.input.movementForward > 0 && player.getHungerManager().getFoodLevel() > 6 && !player.isSneaking()) {
+            player.setSprinting(true);
+        }
+
+        if (noFall && player.fallDistance > 2.0f) player.fallDistance = 0.0f; 
+        if (fastPlace && client.options.useKey.isPressed()) client.itemUseCooldown = 0; 
 
         if (player.getHungerManager().getFoodLevel() < 15) {
             doAutoEat(client, player);
@@ -127,37 +155,50 @@ public class Modules {
             }
         }
 
+        if (autoTotem) doAutoTotem(client, player);
         if (autoArmor) doAutoArmor(client, player);
         if (chestStealer) doChestStealer(client, player);
         if (scaffold) doScaffold(client, player);
         if (autoMine) doAutoMine(client, player);
         if (autoFish) doAutoFish(client, player);
         if (killAura) doKillAura(client, player);
+
+        if (autoRespawn && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
+            player.requestRespawn();
+            client.setScreen(null);
+        }
     }
 
-    private void doAutoEat(MinecraftClient client, ClientPlayerEntity player) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = player.getInventory().getStack(i);
-            if (stack.contains(DataComponentTypes.FOOD)) {
-                updateState("Кушаю...");
-                if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
-                client.options.useKey.setPressed(true);
-                if (player.getHungerManager().getFoodLevel() >= 20) {
-                    client.options.useKey.setPressed(false);
+    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {
+        xrayBlocks.clear();
+        BlockPos pPos = player.getBlockPos();
+        int radius = 25; 
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    Block b = client.world.getBlockState(pos).getBlock();
+                    if (b == Blocks.DIAMOND_ORE || b == Blocks.DEEPSLATE_DIAMOND_ORE ||
+                        b == Blocks.EMERALD_ORE || b == Blocks.DEEPSLATE_EMERALD_ORE ||
+                        b == Blocks.GOLD_ORE || b == Blocks.DEEPSLATE_GOLD_ORE ||
+                        b == Blocks.IRON_ORE || b == Blocks.DEEPSLATE_IRON_ORE ||
+                        b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE ||
+                        b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE) {
+                        xrayBlocks.add(pos);
+                    }
                 }
-                return;
             }
         }
     }
 
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // Логика отступления (теперь плавная)
         if (escapeTicks > 0) {
             escapeTicks--;
             updateState("Отступаю от привата...");
             client.options.forwardKey.setPressed(true); 
             client.options.backKey.setPressed(false);
-            client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
+            client.options.jumpKey.setPressed(false);
             return;
         }
 
@@ -180,26 +221,29 @@ public class Modules {
             }
         }
 
-        // 1. СБОР ЛУТА (Приоритет)
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
 
         if (targetItem != null) {
-            updateState("Сбор лута");
-            double dist = player.getPos().distanceTo(targetItem.getPos());
-            if (dist > 1.2) {
-                lookAtEntity(player, targetItem);
-                client.options.forwardKey.setPressed(true);
-                client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
+            BlockHitResult hit = client.world.raycast(new RaycastContext(player.getEyePos(), targetItem.getPos(), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+            if (hit.getType() != HitResult.Type.MISS && !hit.getBlockPos().equals(targetItem.getBlockPos())) {
+                targetItem = null;
             } else {
-                client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false);
+                updateState("Сбор лута");
+                double dist = player.getPos().distanceTo(targetItem.getPos());
+                if (dist > 1.2) {
+                    lookAtEntity(player, targetItem);
+                    client.options.forwardKey.setPressed(true);
+                    client.options.jumpKey.setPressed(false);
+                } else {
+                    client.options.forwardKey.setPressed(false);
+                    client.options.jumpKey.setPressed(false);
+                }
+                return; 
             }
-            return; 
         }
 
-        // 2. ПОИСК РУДЫ
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir() || blacklistedBlocks.containsKey(targetBlock)) {
             updateState("Сканирую руду");
             targetBlock = findNearestOre(client, player);
@@ -223,13 +267,13 @@ public class Modules {
             if (dist <= 4.5) {
                 updateState("Добываю " + oreNames[targetOreIndex]);
                 client.options.forwardKey.setPressed(false);
-                client.options.jumpKey.setPressed(false); // НЕ ПРЫГАЕМ
+                client.options.jumpKey.setPressed(false);
                 lookAt(player, targetBlock);
                 
                 if (client.world.getBlockState(targetBlock).isAir()) {
                     blacklistedBlocks.put(targetBlock, System.currentTimeMillis());
                     targetBlock = null;
-                    actionDelay = 3 + random.nextInt(5); // Задержка, как будто смотрим на лут
+                    actionDelay = 3 + random.nextInt(5);
                 } else {
                     breakBlock(client, player, targetBlock);
                 }
@@ -238,31 +282,24 @@ public class Modules {
 
             int dy = targetBlock.getY() - player.getBlockPos().getY();
             
-            // КОПАЕМ ЛЕСТНИЦУ (ВВЕРХ)
             if (dy >= 2) {
                 updateState("Копаю лестницу ВВЕРХ");
                 BlockPos upFront = player.getBlockPos().offset(player.getHorizontalFacing()).up();
                 lookAt(player, upFront);
                 breakBlock(client, player, upFront);
-                // Прыжок ТОЛЬКО если блок спереди сломан и нам надо залезть
-                if (client.world.getBlockState(upFront).isAir() && player.horizontalCollision) {
-                    client.options.jumpKey.setPressed(true);
-                }
+                if (client.world.getBlockState(upFront).isAir() && player.horizontalCollision) client.options.jumpKey.setPressed(true);
                 return;
             }
             
-            // КОПАЕМ ЛЕСТНИЦУ (ВНИЗ)
             if (dy <= -2) {
                 updateState("Копаю лестницу ВНИЗ");
                 BlockPos downFront = player.getBlockPos().offset(player.getHorizontalFacing()).down();
                 lookAt(player, downFront);
                 breakBlock(client, player, downFront);
-                // Прыжок не нужен, просто идем вперед
                 if (client.world.getBlockState(downFront).isAir()) client.options.forwardKey.setPressed(true);
                 return;
             }
 
-            // ИДЕМ К РУДЕ
             updateState("Иду к руде");
             lookAt(player, targetBlock);
 
@@ -285,18 +322,24 @@ public class Modules {
                 return;
             }
 
-            // Движение вперед (БЕЗ ПРЫЖКОВ)
             client.options.forwardKey.setPressed(true);
             
-            // ПРЫГАЕМ ТОЛЬКО ЕСЛИ УПЕРЛИСЬ В БЛОК ВЫСОТОЙ 1 БЛОК
-            if (player.horizontalCollision && player.isOnGround()) {
-                if (!client.world.getBlockState(front).isAir() && client.world.getBlockState(front.up()).isAir()) {
+            if (player.getPos().distanceTo(lastPos) < 0.05) {
+                stuckTicks++;
+                if (stuckTicks > 20) {
+                    strafeTicks = 10;
+                    strafeLeft = random.nextBoolean();
                     client.options.jumpKey.setPressed(true);
-                } else {
-                    client.options.jumpKey.setPressed(false); // Это стена, копаем
                 }
+            } else stuckTicks = 0;
+            lastPos = player.getPos();
+
+            if (strafeTicks > 0) {
+                if (strafeLeft) client.options.leftKey.setPressed(true);
+                else client.options.rightKey.setPressed(true);
             } else {
-                client.options.jumpKey.setPressed(false);
+                client.options.leftKey.setPressed(false);
+                client.options.rightKey.setPressed(false);
             }
             return;
         }
@@ -321,7 +364,6 @@ public class Modules {
 
     private void breakBlock(MinecraftClient client, ClientPlayerEntity player, BlockPos pos) {
         Block b = client.world.getBlockState(pos).getBlock();
-        
         if (b == Blocks.BEDROCK || b == Blocks.BARRIER || b == Blocks.END_PORTAL_FRAME) {
             blacklistedBlocks.put(pos, System.currentTimeMillis());
             return;
@@ -342,11 +384,7 @@ public class Modules {
         }
 
         client.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-        
-        // Рандомная анимация рукой (человек машет не идеально ровно)
-        if (player.age % (3 + random.nextInt(3)) == 0) {
-            player.swingHand(Hand.MAIN_HAND);
-        }
+        if (player.age % (3 + random.nextInt(3)) == 0) player.swingHand(Hand.MAIN_HAND);
     }
 
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
@@ -384,6 +422,71 @@ public class Modules {
             .stream()
             .min(Comparator.comparingDouble(e -> player.distanceTo(e)))
             .orElse(null);
+    }
+
+    private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
+        if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
+        if (attackCooldown > 0) return;
+
+        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
+            e -> e != player && e.isAlive() && !(e instanceof ArmorStandEntity))
+            .stream()
+            .sorted(Comparator.comparing((LivingEntity e) -> !(e instanceof PlayerEntity))
+                    .thenComparingDouble(LivingEntity::getHealth))
+            .findFirst()
+            .orElse(null);
+
+        killAuraTarget = target;
+
+        if (target != null) {
+            if (player.distanceTo(target) > 3.0) return;
+
+            Vec3d eye = player.getEyePos();
+            Vec3d targetPos = target.getEyePos();
+            BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+            
+            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
+                if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
+                    for (int i = 0; i < 9; i++) {
+                        if (player.getInventory().getStack(i).getItem() instanceof SwordItem) {
+                            player.getInventory().selectedSlot = i;
+                            break;
+                        }
+                    }
+                }
+                lookAtEntity(player, target);
+                if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
+                    client.interactionManager.attackEntity(player, target);
+                    player.swingHand(Hand.MAIN_HAND);
+                    attackCooldown = 6 + random.nextInt(4); 
+                }
+            }
+        }
+    }
+
+    private void doAutoTotem(MinecraftClient client, ClientPlayerEntity player) {
+        if (player.getOffHandStack().getItem() == Items.TOTEM_OF_UNDYING) return;
+        for (int i = 0; i < 36; i++) {
+            if (player.getInventory().getStack(i).getItem() == Items.TOTEM_OF_UNDYING) {
+                client.interactionManager.clickSlot(player.playerScreenHandler.syncId, i < 9 ? i + 36 : i, 40, SlotActionType.SWAP, player);
+                return;
+            }
+        }
+    }
+
+    private void doAutoEat(MinecraftClient client, ClientPlayerEntity player) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.contains(DataComponentTypes.FOOD)) {
+                updateState("Кушаю...");
+                if (player.getInventory().selectedSlot != i) player.getInventory().selectedSlot = i;
+                client.options.useKey.setPressed(true);
+                if (player.getHungerManager().getFoodLevel() >= 20) {
+                    client.options.useKey.setPressed(false);
+                }
+                return;
+            }
+        }
     }
 
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
@@ -456,73 +559,6 @@ public class Modules {
         }
     }
 
-    private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.getAttackCooldownProgress(0.5f) < 1.0f) return;
-        if (attackCooldown > 0) return;
-
-        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(3.8), 
-            e -> e != player && e.isAlive() && !(e instanceof ArmorStandEntity))
-            .stream()
-            .sorted(Comparator.comparing((LivingEntity e) -> !(e instanceof PlayerEntity))
-                    .thenComparingDouble(LivingEntity::getHealth))
-            .findFirst()
-            .orElse(null);
-
-        if (target != null) {
-            Vec3d eye = player.getEyePos();
-            Vec3d targetPos = target.getEyePos();
-            BlockHitResult hit = client.world.raycast(new RaycastContext(eye, targetPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-            
-            if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(target.getBlockPos())) {
-                if (!(player.getMainHandStack().getItem() instanceof SwordItem || player.getMainHandStack().getItem() instanceof AxeItem)) {
-                    for (int i = 0; i < 9; i++) {
-                        if (player.getInventory().getStack(i).getItem() instanceof SwordItem) {
-                            player.getInventory().selectedSlot = i;
-                            break;
-                        }
-                    }
-                }
-                lookAtEntity(player, target);
-                if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
-                    client.interactionManager.attackEntity(player, target);
-                    player.swingHand(Hand.MAIN_HAND);
-                    attackCooldown = 6 + random.nextInt(4); 
-                }
-            }
-        }
-    }
-
-    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
-        double dx = entity.getX() - player.getX();
-        double dz = entity.getZ() - player.getZ();
-        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
-    }
-
-    public void renderESP(WorldRenderContext context) {
-        if (targetBlock == null) return;
-        MatrixStack matrices = context.matrixStack();
-        if (matrices == null) return;
-
-        Vec3d camPos = context.camera().getPos();
-        matrices.push();
-        matrices.translate(-camPos.x, -camPos.y, -camPos.z);
-
-        Box box = new Box(targetBlock).expand(0.002);
-        VertexConsumerProvider consumers = context.consumers();
-        if (consumers != null) {
-            VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f); 
-            if (MinecraftClient.getInstance().player != null) {
-                Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
-                Vec3d targetVec = Vec3d.ofCenter(targetBlock);
-                Matrix4f matrix = matrices.peek().getPositionMatrix();
-                lines.vertex(matrix, (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
-                lines.vertex(matrix, (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
-            }
-        }
-        matrices.pop();
-    }
-
     private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {
         FishingBobberEntity hook = null;
         for (net.minecraft.entity.Entity e : client.world.getEntities()) {
@@ -535,13 +571,58 @@ public class Modules {
             player.swingHand(Hand.MAIN_HAND);
             fishTimer = 20; 
         } else if (hook != null && hook.getVelocity().y < -0.08) {
-            client.interactionManager.interactItem(player, Hand.MAIN_HAND);
-            player.swingHand(Hand.MAIN_HAND);
-            fishTimer = 20;
+            if (fishTimer <= 0) {
+                client.interactionManager.interactItem(player, Hand.MAIN_HAND);
+                player.swingHand(Hand.MAIN_HAND);
+                fishTimer = 20 + random.nextInt(10);
+            }
         }
+        if (fishTimer > 0) fishTimer--;
     }
 
-    // ЧЕЛОВЕЧЕСКИЙ ПОВОРОТ КАМЕРЫ (Очень плавный, 3-4 градуса за тик)
+    public void renderESP(WorldRenderContext context) {
+        MatrixStack matrices = context.matrixStack();
+        if (matrices == null) return;
+
+        Vec3d camPos = context.camera().getPos();
+        matrices.push();
+        matrices.translate(-camPos.x, -camPos.y, -camPos.z);
+
+        VertexConsumerProvider consumers = context.consumers();
+        if (consumers != null) {
+            VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
+            
+            if (xray) {
+                for (BlockPos pos : xrayBlocks) {
+                    Box box = new Box(pos).expand(0.002);
+                    VertexRendering.drawBox(matrices, lines, box, 0.0f, 1.0f, 1.0f, 1.0f);
+                }
+            }
+
+            if (targetBlock != null) {
+                Box box = new Box(targetBlock).expand(0.002);
+                VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+                if (MinecraftClient.getInstance().player != null) {
+                    Vec3d eye = MinecraftClient.getInstance().player.getEyePos();
+                    Vec3d targetVec = Vec3d.ofCenter(targetBlock);
+                    Matrix4f matrix = matrices.peek().getPositionMatrix();
+                    lines.vertex(matrix, (float)eye.x, (float)eye.y, (float)eye.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
+                    lines.vertex(matrix, (float)targetVec.x, (float)targetVec.y, (float)targetVec.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0f, 1f, 0f);
+                }
+            }
+
+            if (playerESP && MinecraftClient.getInstance().world != null) {
+                for (net.minecraft.entity.player.PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
+                    if (p != MinecraftClient.getInstance().player) {
+                        Box box = p.getBoundingBox().expand(0.1);
+                        VertexRendering.drawBox(matrices, lines, box, 1.0f, 0.0f, 0.0f, 1.0f);
+                    }
+                }
+            }
+        }
+        matrices.pop();
+    }
+
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
         Vec3d target = Vec3d.ofCenter(pos);
         Vec3d eye = player.getEyePos();
@@ -549,13 +630,10 @@ public class Modules {
         double dist = Math.sqrt(dx * dx + dz * dz);
         float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
-        
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        // Ограничиваем скорость поворота (макс 4 градуса за тик + немного рандома)
         float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
-        
         player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
@@ -573,8 +651,13 @@ public class Modules {
         float dPitch = targetPitch - player.getPitch();
         
         float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
-        
         player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed)); 
         player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
+    }
+
+    private float getYawToEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
+        double dx = entity.getX() - player.getX();
+        double dz = entity.getZ() - player.getZ();
+        return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
     }
 }
