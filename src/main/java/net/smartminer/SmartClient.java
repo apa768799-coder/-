@@ -45,15 +45,10 @@ public class SmartClient implements ClientModInitializer {
             }
         });
 
-        // Визуалы (рисуем рамку вокруг руды)
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
-            if (client().world != null && modules.autoMine) {
+            if (MinecraftClient.getInstance().world != null && modules.autoMine) {
                 modules.renderESP(context);
             }
         });
-    }
-
-    private MinecraftClient client() {
-        return MinecraftClient.getInstance();
     }
 }
