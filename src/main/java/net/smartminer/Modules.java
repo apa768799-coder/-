@@ -22,7 +22,6 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.FishingBobberEntity;
 import net.minecraft.item.*;
-import net.minecraft.particle.ParticleTypes;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -43,6 +42,7 @@ import java.util.Map;
 import java.util.Random;
 
 public class Modules {
+    // Существующие
     public boolean autoMine = false;
     public boolean autoFish = false;
     public boolean killAura = false;
@@ -51,13 +51,12 @@ public class Modules {
     public boolean scaffold = false;
     public boolean velocity = false;
     public boolean chestStealer = false;
-    
     public boolean autoTotem = false;
     public boolean noFall = false;
     public boolean autoRespawn = false;
     public boolean sprint = false;
     
-    // ВИЗУАЛЫ
+    // Визуалы
     public boolean fullBright = false;
     public boolean playerESP = false;
     public boolean xray = false;
@@ -66,15 +65,17 @@ public class Modules {
     public boolean glowESP = false; 
     public boolean tracers = false; 
     public boolean trajectory = false;
-    
-    // БОЕВЫЕ ФИШКИ (Pulse Style)
     public boolean criticals = false;
     public boolean hitParticles = false;
     public boolean damageNumbers = false;
     public boolean hitCounter = false;
     public boolean lowHp = false;
 
-    // ВЫБОР РУД ДЛЯ X-RAY
+    // НОВЫЕ МОДУЛИ v3.0
+    public boolean holeESP = false;
+    public boolean autoTrap = false;
+
+    // Руды для X-Ray
     public boolean xrayDiamond = true;
     public boolean xrayIron = true;
     public boolean xrayGold = true;
@@ -95,7 +96,9 @@ public class Modules {
     public int currentHitCount = 0;
 
     private List<BlockPos> xrayBlocks = new ArrayList<>();
+    private List<BlockPos> holeBlocks = new ArrayList<>();
     private int xrayTimer = 0;
+    private int holeTimer = 0;
 
     private int fishTimer = 0;
     private int attackCooldown = 0;
@@ -103,7 +106,6 @@ public class Modules {
     private int escapeTicks = 0;
     private int actionDelay = 0;
     private int targetItemTimer = 0;
-    
     private int targetTimer = 0;
     private BlockPos currentlyBreaking = null;
     private int breakStuckTicks = 0;
@@ -117,7 +119,6 @@ public class Modules {
     private Random random = new Random();
     private String lastLoggedState = "";
 
-    // Для Damage Numbers
     public List<DamageNumber> damageNumbersList = new ArrayList<>();
 
     public void copyFrom(Modules other) {
@@ -147,6 +148,8 @@ public class Modules {
         this.damageNumbers = other.damageNumbers;
         this.hitCounter = other.hitCounter;
         this.lowHp = other.lowHp;
+        this.holeESP = other.holeESP;
+        this.autoTrap = other.autoTrap;
 
         this.xrayDiamond = other.xrayDiamond;
         this.xrayIron = other.xrayIron;
@@ -211,6 +214,14 @@ public class Modules {
             }
         }
 
+        if (holeESP) {
+            holeTimer++;
+            if (holeTimer >= 20) {
+                updateHoleBlocks(client, player);
+                holeTimer = 0;
+            }
+        }
+
         if (glowESP && client.world != null) {
             for (Entity e : client.world.getEntities()) {
                 if (e instanceof PlayerEntity && e != player) e.setGlowing(true);
@@ -256,6 +267,7 @@ public class Modules {
         if (autoMine) doAutoMine(client, player);
         if (autoFish) doAutoFish(client, player);
         if (killAura) doKillAura(client, player);
+        if (autoTrap) doAutoTrap(client, player);
 
         if (autoRespawn && client.currentScreen instanceof net.minecraft.client.gui.screen.DeathScreen) {
             player.requestRespawn();
@@ -281,6 +293,38 @@ public class Modules {
                     if (xrayRedstone && (b == Blocks.REDSTONE_ORE || b == Blocks.DEEPSLATE_REDSTONE_ORE)) isTarget = true;
                     if (xrayLapis && (b == Blocks.LAPIS_ORE || b == Blocks.DEEPSLATE_LAPIS_ORE)) isTarget = true;
                     if (isTarget) xrayBlocks.add(pos);
+                }
+            }
+        }
+    }
+
+    private void updateHoleBlocks(MinecraftClient client, ClientPlayerEntity player) {
+        holeBlocks.clear();
+        BlockPos pPos = player.getBlockPos();
+        int radius = 10;
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -5; y <= 5; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    if (!client.world.getBlockState(pos).isAir()) continue;
+                    if (!client.world.getBlockState(pos.up()).isAir()) continue;
+                    if (!client.world.getBlockState(pos.up(2)).isAir()) continue;
+                    
+                    Block floor = client.world.getBlockState(pos.down()).getBlock();
+                    if (floor != Blocks.OBSIDIAN && floor != Blocks.BEDROCK) continue;
+                    
+                    Block n1 = client.world.getBlockState(pos.north()).getBlock();
+                    Block s1 = client.world.getBlockState(pos.south()).getBlock();
+                    Block e1 = client.world.getBlockState(pos.east()).getBlock();
+                    Block w1 = client.world.getBlockState(pos.west()).getBlock();
+                    
+                    int solidCount = 0;
+                    if (n1 == Blocks.OBSIDIAN || n1 == Blocks.BEDROCK) solidCount++;
+                    if (s1 == Blocks.OBSIDIAN || s1 == Blocks.BEDROCK) solidCount++;
+                    if (e1 == Blocks.OBSIDIAN || e1 == Blocks.BEDROCK) solidCount++;
+                    if (w1 == Blocks.OBSIDIAN || w1 == Blocks.BEDROCK) solidCount++;
+                    
+                    if (solidCount >= 2) holeBlocks.add(pos);
                 }
             }
         }
@@ -319,6 +363,43 @@ public class Modules {
             }
         } else {
             if (client.options.sneakKey.isPressed()) client.options.sneakKey.setPressed(false);
+        }
+    }
+
+    private void doAutoTrap(MinecraftClient client, ClientPlayerEntity player) {
+        if (killAuraTarget == null || !killAuraTarget.isAlive()) return;
+        if (player.getPos().distanceTo(killAuraTarget.getPos()) > 5.0) return;
+
+        // Ищем обсидиан в хотбаре
+        int obbySlot = -1;
+        for (int i = 0; i < 9; i++) {
+            if (player.getInventory().getStack(i).getItem() == Items.OBSIDIAN) {
+                obbySlot = i;
+                break;
+            }
+        }
+        if (obbySlot == -1) return;
+        if (player.getInventory().selectedSlot != obbySlot) {
+            player.getInventory().selectedSlot = obbySlot;
+            return;
+        }
+
+        BlockPos targetPos = killAuraTarget.getBlockPos();
+        Direction[] dirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+        
+        for (Direction dir : dirs) {
+            BlockPos placePos = targetPos.offset(dir);
+            if (!client.world.getBlockState(placePos).isAir()) continue;
+            if (!client.world.getBlockState(placePos.up()).isAir()) continue;
+            
+            BlockPos neighbor = placePos.down();
+            if (client.world.getBlockState(neighbor).isAir()) continue;
+            
+            Vec3d hitVec = Vec3d.ofCenter(neighbor).add(0, 0.5, 0);
+            BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, neighbor, false);
+            client.interactionManager.interactBlock(player, Hand.MAIN_HAND, hit);
+            player.swingHand(Hand.MAIN_HAND);
+            return;
         }
     }
 
@@ -583,27 +664,13 @@ public class Modules {
                     player.swingHand(Hand.MAIN_HAND);
                     attackCooldown = 6 + random.nextInt(4); 
                     
-                    // Добавляем фишки при ударе
-                    float damage = 5.0f; // Примерный урон
-                    if (damageNumbers) {
-                        damageNumbersList.add(new DamageNumber(target.getPos(), damage, false));
-                    }
-                    if (hitParticles) {
-                        for (int i = 0; i < 10; i++) {
-                            client.world.addParticle(ParticleTypes.CRIT, 
-                                target.getX() + (random.nextDouble() - 0.5), 
-                                target.getY() + target.getHeight() / 2 + (random.nextDouble() - 0.5), 
-                                target.getZ() + (random.nextDouble() - 0.5), 
-                                0, 0, 0);
-                        }
-                    }
-                    if (hitCounter) {
-                        currentHitCount++;
-                    }
+                    float damage = 5.0f;
+                    if (damageNumbers) damageNumbersList.add(new DamageNumber(target.getPos(), damage, false));
+                    if (hitCounter) currentHitCount++;
                 }
             }
         } else {
-            if (hitCounter) currentHitCount = 0; // Сброс счетчика при потере цели
+            if (hitCounter) currentHitCount = 0;
         }
     }
 
@@ -719,7 +786,6 @@ public class Modules {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
             Vec3d eye = MinecraftClient.getInstance().player != null ? MinecraftClient.getInstance().player.getEyePos() : camPos;
 
-            // X-RAY (Полные боксы)
             if (xray) {
                 for (BlockPos pos : xrayBlocks) {
                     Block b = MinecraftClient.getInstance().world.getBlockState(pos).getBlock();
@@ -743,7 +809,13 @@ public class Modules {
                 }
             }
 
-            // Player ESP
+            if (holeESP) {
+                for (BlockPos pos : holeBlocks) {
+                    Box box = new Box(pos).expand(0.002);
+                    drawFullBox(matrices, lines, box, 0.0f, 1.0f, 0.5f, 1.0f); // Зеленый для безопасных дырок
+                }
+            }
+
             if (playerESP && MinecraftClient.getInstance().world != null) {
                 for (PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
                     if (p != MinecraftClient.getInstance().player) {
@@ -758,7 +830,6 @@ public class Modules {
                 }
             }
 
-            // Chest ESP
             if (chestESP && MinecraftClient.getInstance().world != null) {
                 BlockPos pPos = MinecraftClient.getInstance().player.getBlockPos();
                 int radius = 20;
@@ -781,7 +852,6 @@ public class Modules {
                 }
             }
 
-            // Item ESP
             if (itemESP && MinecraftClient.getInstance().world != null) {
                 for (Entity e : MinecraftClient.getInstance().world.getEntities()) {
                     if (e instanceof ItemEntity) {
@@ -796,14 +866,13 @@ public class Modules {
                 }
             }
 
-            // Trajectory (Предсказание траектории)
             if (trajectory) {
                 ClientPlayerEntity player = MinecraftClient.getInstance().player;
                 if (player != null && player.isUsingItem() && player.getActiveItem().getItem() instanceof BowItem) {
                     Vec3d start = player.getEyePos();
                     float pitch = player.getPitch();
                     float yaw = player.getYaw();
-                    float vel = 3.0f; // Начальная скорость стрелы
+                    float vel = 3.0f; 
                     
                     Vec3d dir = new Vec3d(
                         -MathHelper.sin(yaw * (float)Math.PI / 180.0f) * MathHelper.cos(pitch * (float)Math.PI / 180.0f),
@@ -819,7 +888,7 @@ public class Modules {
                         lines.vertex(matrices.peek().getPositionMatrix(), (float)pos.x, (float)pos.y, (float)pos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
                         lines.vertex(matrices.peek().getPositionMatrix(), (float)nextPos.x, (float)nextPos.y, (float)nextPos.z).color(1.0f, 0.0f, 0.0f, 1.0f).normal(0, 1, 0);
                         pos = nextPos;
-                        velVec = velVec.multiply(0.99).add(0, -0.05, 0); // Гравитация и сопротивление
+                        velVec = velVec.multiply(0.99).add(0, -0.05, 0); 
                         
                         if (MinecraftClient.getInstance().world.getBlockState(BlockPos.ofFloored(pos)).isSolid()) break;
                     }
@@ -888,7 +957,6 @@ public class Modules {
         return (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
     }
 
-    // Класс для хранения данных о числе урона
     public static class DamageNumber {
         public Vec3d pos;
         public float damage;
