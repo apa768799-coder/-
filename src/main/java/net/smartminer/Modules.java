@@ -31,6 +31,7 @@ import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
 import java.util.Comparator;
+import java.util.Random;
 
 public class Modules {
     public boolean autoMine = false;
@@ -56,9 +57,11 @@ public class Modules {
     private int attackCooldown = 0;
     private int afkTicks = 0;
     
-    // Анти-залипание
-    private int stuckTicks = 0;
-    private Vec3d lastPlayerPos = Vec3d.ZERO;
+    private Random random = new Random();
+
+    // Для проверки на приват
+    private BlockPos lastBrokenBlock = null;
+    private int unbreakableTicks = 0; 
 
     public void onTick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
@@ -94,23 +97,8 @@ public class Modules {
         if (killAura) doKillAura(client, player);
     }
 
-    // ================== AUTOMINE С АНТИ-ЗАЛИПАНИЕМ ==================
+    // ================== AUTOMINE С ЗАЩИТОЙ ОТ ПРИВАТА ==================
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {
-        // Проверка на застревание (если бот не двигался 2 секунды)
-        if (player.getPos().distanceTo(lastPlayerPos) < 0.05) {
-            stuckTicks++;
-            if (stuckTicks > 40) {
-                currentState = "Залип, сброс целей";
-                targetBlock = null;
-                targetItem = null;
-                stuckTicks = 0;
-            }
-        } else {
-            stuckTicks = 0;
-        }
-        lastPlayerPos = player.getPos();
-
-        // 1. Берем кирку
         if (!(player.getMainHandStack().getItem() instanceof PickaxeItem)) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).getItem() instanceof PickaxeItem) {
@@ -120,7 +108,6 @@ public class Modules {
             }
         }
 
-        // 2. Ищем руду (ТОЛЬКО на доступной высоте)
         if (targetBlock == null || client.world.getBlockState(targetBlock).isAir()) {
             currentState = "Поиск руды";
             targetBlock = findNearestOre(client, player);
@@ -139,9 +126,25 @@ public class Modules {
                 lookAt(player, targetBlock);
                 
                 if (breakCooldown <= 0) {
+                    // ПРОВЕРКА НА ПРИВАТ
+                    if (targetBlock.equals(lastBrokenBlock)) {
+                        unbreakableTicks++;
+                        if (unbreakableTicks > 40) { // 2 секунды не ломается
+                            currentState = "Приват! Ищу другое место";
+                            targetBlock = null;
+                            lastBrokenBlock = null;
+                            unbreakableTicks = 0;
+                            player.setYaw(player.getYaw() + (float)(Math.random() * 90 - 45)); // Отворачиваемся
+                            return;
+                        }
+                    } else {
+                        lastBrokenBlock = targetBlock;
+                        unbreakableTicks = 0;
+                    }
+
                     client.interactionManager.updateBlockBreakingProgress(targetBlock, Direction.UP);
                     player.swingHand(Hand.MAIN_HAND);
-                    breakCooldown = 2; 
+                    breakCooldown = 3 + random.nextInt(3); 
                 }
                 return;
             }
@@ -157,9 +160,25 @@ public class Modules {
                 lookAt(player, hitBlock); 
                 
                 if (breakCooldown <= 0) {
+                    // ПРОВЕРКА НА ПРИВАТ (ДЛЯ СТЕНЫ)
+                    if (hitBlock.equals(lastBrokenBlock)) {
+                        unbreakableTicks++;
+                        if (unbreakableTicks > 40) {
+                            currentState = "Стена в привате! Отмена";
+                            targetBlock = null;
+                            lastBrokenBlock = null;
+                            unbreakableTicks = 0;
+                            player.setYaw(player.getYaw() + (float)(Math.random() * 90 - 45));
+                            return;
+                        }
+                    } else {
+                        lastBrokenBlock = hitBlock;
+                        unbreakableTicks = 0;
+                    }
+
                     client.interactionManager.updateBlockBreakingProgress(hitBlock, Direction.UP);
                     player.swingHand(Hand.MAIN_HAND);
-                    breakCooldown = 2; 
+                    breakCooldown = 3 + random.nextInt(3); 
                 }
                 return;
             }
@@ -182,7 +201,7 @@ public class Modules {
             return;
         }
 
-        // 3. Сбор лута (строго вблизи)
+        // Сбор лута
         if (targetItem == null || targetItem.isRemoved() || !targetItem.isAlive()) {
             targetItem = findNearestItem(client, player);
         }
@@ -199,12 +218,42 @@ public class Modules {
             return;
         }
 
-        // 4. Если ничего нет
-        currentState = "Сканирую";
-        player.setYaw(player.getYaw() + 10.0f);
+        // Авто-туннель
+        currentState = "Копаю туннель";
+        lookAt(player, player.getBlockPos().offset(player.getHorizontalFacing(), 2));
+        client.options.forwardKey.setPressed(true);
+
+        BlockPos front = player.getBlockPos().offset(player.getHorizontalFacing());
+        
+        if (client.world.getBlockState(front.down()).getBlock() == Blocks.LAVA) {
+            player.setYaw(player.getYaw() + 45.0f); 
+            return;
+        }
+
+        if (!client.world.getBlockState(front).isAir()) {
+            if (breakCooldown <= 0) {
+                // ПРОВЕРКА НА ПРИВАТ (ДЛЯ ТУННЕЛЯ)
+                if (front.equals(lastBrokenBlock)) {
+                    unbreakableTicks++;
+                    if (unbreakableTicks > 40) {
+                        currentState = "Туннель в привате! Стоп";
+                        lastBrokenBlock = null;
+                        unbreakableTicks = 0;
+                        player.setYaw(player.getYaw() + (float)(Math.random() * 90 - 45));
+                        return;
+                    }
+                } else {
+                    lastBrokenBlock = front;
+                    unbreakableTicks = 0;
+                }
+
+                client.interactionManager.updateBlockBreakingProgress(front, Direction.UP);
+                player.swingHand(Hand.MAIN_HAND);
+                breakCooldown = 3 + random.nextInt(3); 
+            }
+        }
     }
 
-    // Ищем руду только на доступной высоте (+2 блока вверх, -3 вниз)
     private BlockPos findNearestOre(MinecraftClient client, ClientPlayerEntity player) {
         BlockPos pPos = player.getBlockPos();
         BlockPos nearest = null;
@@ -221,10 +270,6 @@ public class Modules {
             for (int y = -15; y <= 15; y++) {
                 for (int z = -15; z <= 15; z++) {
                     BlockPos pos = pPos.add(x, y, z);
-                    
-                    // ФИЛЬТР ПО ВЫСОТЕ (не ищем руду на потолке)
-                    if (pos.getY() > pPos.getY() + 2 || pos.getY() < pPos.getY() - 3) continue;
-
                     Block b = client.world.getBlockState(pos).getBlock();
                     if (b == t1 || b == t2) {
                         double d = pPos.getSquaredDistance(pos);
@@ -237,7 +282,6 @@ public class Modules {
     }
 
     private ItemEntity findNearestItem(MinecraftClient client, ClientPlayerEntity player) {
-        // Уменьшенный радиус (3 блока), чтобы не бегать за мусором за стеной
         return client.world.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(3.0), 
             e -> e.isAlive() && !e.getStack().isEmpty())
             .stream()
@@ -245,7 +289,6 @@ public class Modules {
             .orElse(null);
     }
 
-    // ================== ОСТАЛЬНОЕ ==================
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
@@ -344,7 +387,7 @@ public class Modules {
                 if (Math.abs(MathHelper.wrapDegrees(player.getYaw() - getYawToEntity(player, target))) < 15) {
                     client.interactionManager.attackEntity(player, target);
                     player.swingHand(Hand.MAIN_HAND);
-                    attackCooldown = 4; 
+                    attackCooldown = 6 + random.nextInt(4); 
                 }
             }
         }
@@ -408,8 +451,9 @@ public class Modules {
         float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 25.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 25.0f));
+        
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 8.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 8.0f));
     }
 
     private void lookAtEntity(ClientPlayerEntity player, net.minecraft.entity.Entity entity) {
@@ -424,7 +468,7 @@ public class Modules {
         float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
         float dPitch = targetPitch - player.getPitch();
         
-        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 15.0f)); 
-        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 15.0f));
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), 8.0f)); 
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), 8.0f));
     }
 }
