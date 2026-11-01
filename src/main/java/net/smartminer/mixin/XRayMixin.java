@@ -13,7 +13,9 @@ public class XRayMixin {
     @Inject(method = "shouldDrawSide", at = @At("HEAD"), cancellable = true)
     private static void onShouldDrawSide(BlockState state, BlockState sideState, Direction side, CallbackInfoReturnable<Boolean> cir) {
         if (SmartClient.modules != null && SmartClient.modules.xray) {
-            if (!SmartClient.modules.isXrayBlock(state)) cir.setReturnValue(false); 
+            if (!SmartClient.modules.isXrayBlock(state)) {
+                cir.setReturnValue(false); 
+            }
         }
     }
 }
