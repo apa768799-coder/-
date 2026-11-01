@@ -27,9 +27,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Matrix4f;
 
-import java.awt.*;
 import java.util.*;
-import java.util.List;
 
 public class Modules {
     // --- Флаги модулей ---
@@ -47,22 +45,35 @@ public class Modules {
     public boolean autoTotem = false;
     public boolean autoArmor = false;
     public boolean autoEat = false;
+    // Новые модули Delta
+    public boolean reach = false;
+    public boolean autoSwap = false;
+    public boolean velocity = false;
+    public boolean blockESP = false;
+    public boolean entityBox = false;
 
     // --- Настройки ---
     public float killAuraRange = 3.5f;
     public int minHpToMine = 8;
     public int minOrePriority = 30;
+    // Настройки Delta
+    public String killAuraMode = "FunTime"; // "FunTime" или "Legit"
+    public float reachDistance = 5.0f; // Стандартный блок — 3.0, здесь 5.0
+    public float velocityPercent = 0.0f; // 0% = полное отсутствие отбрасывания
+    public String espBlock = "diamond_ore"; // Блок для BlockESP
 
     // --- Внутренние переменные ---
     private final Random random = new Random();
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
     private final List<BlockPos> xrayBlocks = new ArrayList<>();
+    private final List<BlockPos> espBlocks = new ArrayList<>();
     private BlockPos targetBlock = null;
     private int xrayTimer = 0;
     private int actionDelay = 0;
     private int attackCooldown = 0;
     private int regionEscapeTicks = 0;
     private long lastChatWarningTime = 0;
+    private Item lastSwapItem = null;
 
     private static final Map<Block, Integer> ORE_PRIORITY = new HashMap<>();
     static {
@@ -98,6 +109,13 @@ public class Modules {
         if (attackCooldown > 0) attackCooldown--;
         if (fullBright) client.options.getGamma().setValue(10.0);
 
+        // Velocity
+        if (velocity && player.hurtTime > 0) {
+            Vec3d vel = player.getVelocity();
+            player.setVelocity(vel.x * velocityPercent, vel.y, vel.z * velocityPercent);
+        }
+
+        // AutoEat
         if (autoEat && player.getHungerManager().getFoodLevel() < 15) {
             for (int i = 0; i < 9; i++) {
                 if (player.getInventory().getStack(i).contains(net.minecraft.component.DataComponentTypes.FOOD)) {
@@ -108,15 +126,39 @@ public class Modules {
             }
         }
 
+        // AutoSwap (упрощённый)
+        if (autoSwap) {
+            Item neededItem = null;
+            if (killAura && player.getAttackCooldownProgress(0.5f) >= 1.0f) {
+                // В бою нужен меч
+                neededItem = Items.DIAMOND_SWORD; // или лучший меч
+            } else if (autoMine && targetBlock != null) {
+                // При копании нужна кирка
+                neededItem = Items.DIAMOND_PICKAXE; // или лучшая кирка
+            }
+            if (neededItem != null && player.getMainHandStack().getItem() != neededItem) {
+                for (int i = 0; i < 9; i++) {
+                    if (player.getInventory().getStack(i).getItem() == neededItem) {
+                        player.getInventory().selectedSlot = i;
+                        break;
+                    }
+                }
+            }
+        }
+
         if (autoMine) doAutoMine(client, player);
         if (killAura) doKillAura(client, player);
         if (autoCrystal) doAutoCrystal(client, player);
         if (scaffold) doScaffold(client, player);
         if (surround) doSurround(client, player);
-        
-        if (xray) {
+
+        if (xray || blockESP) {
             xrayTimer++;
-            if (xrayTimer >= 20) { updateXrayBlocks(client, player); xrayTimer = 0; }
+            if (xrayTimer >= 20) {
+                updateXrayBlocks(client, player);
+                if (blockESP) updateBlockESP(client, player);
+                xrayTimer = 0;
+            }
         }
     }
 
@@ -150,15 +192,12 @@ public class Modules {
 
             if (dist <= 4.5) {
                 client.options.forwardKey.setPressed(false);
-                
-                // Проверка видимости (Raycast)
                 BlockHitResult hit = client.world.raycast(new RaycastContext(player.getEyePos(), center, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-                
                 if (hit.getType() == HitResult.Type.MISS || hit.getBlockPos().equals(targetBlock)) {
                     lookAt(player, targetBlock);
+                    // Использование Reach для копания
                     client.interactionManager.updateBlockBreakingProgress(targetBlock, Direction.UP);
                     player.swingHand(Hand.MAIN_HAND);
-                    
                     if (System.currentTimeMillis() - lastChatWarningTime < 1000) {
                         blacklistedBlocks.put(targetBlock, System.currentTimeMillis() + 9999999L);
                         targetBlock = null;
@@ -175,7 +214,6 @@ public class Modules {
                 if (player.horizontalCollision) client.options.jumpKey.setPressed(true);
             }
         } else {
-            // Если руды нет, просто идем вперед
             client.options.forwardKey.setPressed(true);
         }
     }
@@ -202,17 +240,28 @@ public class Modules {
 
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (player.getAttackCooldownProgress(0.5f) < 1.0f || attackCooldown > 0) return;
-        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(killAuraRange), e -> e != player && e.isAlive()).stream().findFirst().orElse(null);
+        LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(killAuraRange + (reach ? reachDistance : 0)), e -> e != player && e.isAlive()).stream().findFirst().orElse(null);
         if (target != null) {
-            lookAtEntity(player, target);
-            client.interactionManager.attackEntity(player, target);
-            player.swingHand(Hand.MAIN_HAND);
-            attackCooldown = 10; // Задержка удара
+            if (killAuraMode.equals("Legit")) {
+                // Плавное наведение
+                lookAtEntitySmooth(player, target);
+                // Случайная задержка
+                if (random.nextInt(10) > 2) { // 70% шанс удара
+                    client.interactionManager.attackEntity(player, target);
+                    player.swingHand(Hand.MAIN_HAND);
+                    attackCooldown = 12;
+                }
+            } else { // FunTime
+                // Быстрое наведение
+                lookAtEntity(player, target);
+                client.interactionManager.attackEntity(player, target);
+                player.swingHand(Hand.MAIN_HAND);
+                attackCooldown = 5; // Очень быстро
+            }
         }
     }
 
     private void doAutoCrystal(MinecraftClient client, ClientPlayerEntity player) {
-        // Упрощенная логика: бьем кристаллы энда рядом
         for (EndCrystalEntity crystal : client.world.getEntitiesByClass(EndCrystalEntity.class, player.getBoundingBox().expand(4.0), e -> true)) {
             lookAtEntity(player, crystal);
             client.interactionManager.attackEntity(player, crystal);
@@ -239,7 +288,6 @@ public class Modules {
     }
 
     private void doSurround(MinecraftClient client, ClientPlayerEntity player) {
-        // Ставим обсидиан вокруг (очень упрощенно)
         for (Direction dir : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
             BlockPos pos = player.getBlockPos().offset(dir);
             if (client.world.getBlockState(pos).isAir()) {
@@ -266,13 +314,18 @@ public class Modules {
         VertexConsumerProvider consumers = context.consumers();
         if (consumers != null) {
             VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
-            
+
             if (xray) {
                 for (BlockPos pos : xrayBlocks) {
                     drawFullBox(matrices, lines, new Box(pos).expand(0.002), 0f, 1f, 1f, 1f);
                 }
             }
-            if (playerESP) {
+            if (blockESP) {
+                for (BlockPos pos : espBlocks) {
+                    drawFullBox(matrices, lines, new Box(pos).expand(0.002), 1f, 0f, 1f, 1f); // Фиолетовый
+                }
+            }
+            if (playerESP || entityBox) {
                 for (PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
                     if (p != MinecraftClient.getInstance().player) {
                         drawFullBox(matrices, lines, p.getBoundingBox().expand(0.1), 1f, 0f, 0f, 1f);
@@ -291,6 +344,26 @@ public class Modules {
                 for (int z = -15; z <= 15; z++) {
                     BlockPos pos = pPos.add(x, y, z);
                     if (ORE_PRIORITY.containsKey(client.world.getBlockState(pos).getBlock())) xrayBlocks.add(pos);
+                }
+            }
+        }
+    }
+
+    private void updateBlockESP(MinecraftClient client, ClientPlayerEntity player) {
+        espBlocks.clear();
+        Block targetBlock = null;
+        switch (espBlock) {
+            case "diamond_ore": targetBlock = Blocks.DIAMOND_ORE; break;
+            case "ancient_debris": targetBlock = Blocks.ANCIENT_DEBRIS; break;
+            case "emerald_ore": targetBlock = Blocks.EMERALD_ORE; break;
+        }
+        if (targetBlock == null) return;
+        BlockPos pPos = player.getBlockPos();
+        for (int x = -20; x <= 20; x++) {
+            for (int y = -20; y <= 20; y++) {
+                for (int z = -20; z <= 20; z++) {
+                    BlockPos pos = pPos.add(x, y, z);
+                    if (client.world.getBlockState(pos).getBlock() == targetBlock) espBlocks.add(pos);
                 }
             }
         }
@@ -325,5 +398,18 @@ public class Modules {
 
     private void lookAtEntity(ClientPlayerEntity player, Entity entity) {
         lookAt(player, entity.getBlockPos());
+    }
+
+    private void lookAtEntitySmooth(ClientPlayerEntity player, Entity entity) {
+        Vec3d target = entity.getPos();
+        double dx = target.x - player.getX(), dy = target.y + entity.getHeight() / 2 - player.getEyeY(), dz = target.z - player.getZ();
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F);
+        float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, dist));
+        float dYaw = MathHelper.wrapDegrees(targetYaw - player.getYaw());
+        float dPitch = targetPitch - player.getPitch();
+        float maxTurnSpeed = 3.0f + random.nextFloat() * 1.5f;
+        player.setYaw(player.getYaw() + Math.signum(dYaw) * Math.min(Math.abs(dYaw), maxTurnSpeed));
+        player.setPitch(player.getPitch() + Math.signum(dPitch) * Math.min(Math.abs(dPitch), maxTurnSpeed));
     }
 }
