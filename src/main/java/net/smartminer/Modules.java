@@ -176,7 +176,6 @@ public class Modules {
         }
     }
 
-    // ДОБАВЛЕНО: Метод для миксина X-Ray
     public boolean isXrayBlock(BlockState state) {
         Block b = state.getBlock();
         if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA || b == Blocks.BEDROCK) return true;
@@ -281,12 +280,13 @@ public class Modules {
         }
     }
 
-    // ИСПРАВЛЕНО: Метод для брони в 1.21.4
+    // ИСПРАВЛЕНО ЗДЕСЬ
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
             if (stack.getItem() instanceof ArmorItem) {
-                EquipmentSlot slot = LivingEntity.getPreferredEquipmentSlot(stack);
+                // Вызываем метод у самого игрока, а не у класса
+                EquipmentSlot slot = player.getPreferredEquipmentSlot(stack);
                 ItemStack current = player.getEquippedStack(slot);
                 
                 if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
@@ -342,7 +342,6 @@ public class Modules {
         matrices.pop();
     }
 
-    // Заглушки, чтобы не было ошибок компиляции
     private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {}
     private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {}
     private void doSurround(MinecraftClient client, ClientPlayerEntity player) {}
