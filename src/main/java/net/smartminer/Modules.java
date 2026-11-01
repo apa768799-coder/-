@@ -36,7 +36,6 @@ import java.util.*;
 import java.util.List;
 
 public class Modules {
-    // --- Флаги модулей ---
     public boolean autoMine = false;
     public boolean killAura = false;
     public boolean triggerBot = false;
@@ -51,7 +50,7 @@ public class Modules {
     public boolean blockESP = false;
     public boolean playerESP = false;
     public boolean targetHUD = false;
-    public boolean entityBox = false; // ДОБАВЛЕНО
+    public boolean entityBox = false;
     public boolean freeLook = false;
     
     public boolean scaffold = false;
@@ -69,7 +68,6 @@ public class Modules {
     public boolean autoBuy = false;
     public boolean autoSell = false;
 
-    // --- Настройки ---
     public float killAuraRange = 3.5f;
     public String killAuraMode = "FunTime"; 
     public float reachDistance = 5.0f; 
@@ -80,7 +78,6 @@ public class Modules {
     public int nukerRadius = 4;
     public String spiderMode = "Vanilla";
 
-    // --- Внутренние переменные ---
     private final Random random = new Random();
     private final Map<BlockPos, Long> blacklistedBlocks = new HashMap<>();
     private final List<BlockPos> xrayBlocks = new ArrayList<>();
@@ -159,7 +156,7 @@ public class Modules {
         if (autoTrap && targetHudEntity != null) doAutoTrap(client, player);
         if (killAura) doKillAura(client, player);
         if (triggerBot) doTriggerBot(client, player);
-        if (autoCrystal) doAutoCrystal(client, player); // ДОБАВЛЕНО
+        if (autoCrystal) doAutoCrystal(client, player);
         if (autoDodge) doAutoDodge(client, player);
         if (scaffold) doScaffold(client, player);
         if (surround) doSurround(client, player);
@@ -179,9 +176,13 @@ public class Modules {
         }
     }
 
-    // ==========================================
-    // БОЕВЫЕ МОДУЛИ
-    // ==========================================
+    // ДОБАВЛЕНО: Метод для миксина X-Ray
+    public boolean isXrayBlock(BlockState state) {
+        Block b = state.getBlock();
+        if (b == Blocks.AIR || b == Blocks.WATER || b == Blocks.LAVA || b == Blocks.BEDROCK) return true;
+        return ORE_PRIORITY.containsKey(b) || b == Blocks.CHEST || b == Blocks.ENDER_CHEST || b == Blocks.SPAWNER;
+    }
+
     private void doKillAura(MinecraftClient client, ClientPlayerEntity player) {
         if (player.getAttackCooldownProgress(0.5f) < 1.0f || attackCooldown > 0) return;
         LivingEntity target = client.world.getEntitiesByClass(LivingEntity.class, player.getBoundingBox().expand(killAuraRange + reachDistance), e -> e != player && e.isAlive()).stream().findFirst().orElse(null);
@@ -206,7 +207,6 @@ public class Modules {
         }
     }
 
-    // ДОБАВЛЕННЫЙ МЕТОД
     private void doAutoCrystal(MinecraftClient client, ClientPlayerEntity player) {
         if (attackCooldown > 0) return;
         for (EndCrystalEntity crystal : client.world.getEntitiesByClass(EndCrystalEntity.class, player.getBoundingBox().expand(4.5), e -> true)) {
@@ -263,9 +263,6 @@ public class Modules {
         }
     }
 
-    // ==========================================
-    // ДВИЖЕНИЕ
-    // ==========================================
     private void doSpider(MinecraftClient client, ClientPlayerEntity player) {
         if (player.horizontalCollision) {
             Vec3d vel = player.getVelocity();
@@ -284,18 +281,14 @@ public class Modules {
         }
     }
 
-    // ==========================================
-    // ИНВЕНТАРЬ (ИСПРАВЛЕННЫЕ МЕТОДЫ)
-    // ==========================================
+    // ИСПРАВЛЕНО: Метод для брони в 1.21.4
     private void doAutoArmor(MinecraftClient client, ClientPlayerEntity player) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            if (stack.getItem() instanceof ArmorItem armorItem) {
-                // ИСПРАВЛЕНО: getType().getEquipmentSlot()
-                EquipmentSlot slot = armorItem.getType().getEquipmentSlot();
+            if (stack.getItem() instanceof ArmorItem) {
+                EquipmentSlot slot = LivingEntity.getPreferredEquipmentSlot(stack);
                 ItemStack current = player.getEquippedStack(slot);
                 
-                // Упрощенная проверка (сравниваем прочность, если энчанты не работают)
                 if (current.isEmpty() || stack.getMaxDamage() > current.getMaxDamage()) {
                     int slotId = i < 9 ? i + 36 : i;
                     client.interactionManager.clickSlot(player.playerScreenHandler.syncId, slotId, 0, SlotActionType.QUICK_MOVE, player);
@@ -317,9 +310,6 @@ public class Modules {
         }
     }
 
-    // ==========================================
-    // ВИЗУАЛ (HUD, ESP) (ИСПРАВЛЕНО)
-    // ==========================================
     public void renderHUD(DrawContext context, float tickDelta) {
         if (targetHUD && targetHudEntity != null) {
             int x = context.getScaledWindowWidth() / 2 + 10;
@@ -343,7 +333,7 @@ public class Modules {
             if (xray) {
                 for (BlockPos pos : xrayBlocks) drawFullBox(matrices, lines, new Box(pos).expand(0.002), 0f, 1f, 1f, 1f);
             }
-            if (playerESP || entityBox) { // ТЕПЕРЬ РАБОТАЕТ
+            if (playerESP || entityBox) {
                 for (PlayerEntity p : MinecraftClient.getInstance().world.getPlayers()) {
                     if (p != MinecraftClient.getInstance().player) drawFullBox(matrices, lines, p.getBoundingBox().expand(0.1), 1f, 0f, 0f, 1f);
                 }
@@ -352,17 +342,14 @@ public class Modules {
         matrices.pop();
     }
 
-    // ==========================================
-    // ЗАГЛУШКИ И ХЕЛПЕРЫ
-    // ==========================================
-    private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    private void doScaffold(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    private void doSurround(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    private void updateBlockESP(MinecraftClient client, ClientPlayerEntity player) { /* Твоя логика */ }
-    
-    private void drawFullBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) { /* Твой рендер */ }
+    // Заглушки, чтобы не было ошибок компиляции
+    private void doAutoMine(MinecraftClient client, ClientPlayerEntity player) {}
+    private void doScaffold(MinecraftClient client, ClientPlayerEntity player) {}
+    private void doSurround(MinecraftClient client, ClientPlayerEntity player) {}
+    private void doAutoFish(MinecraftClient client, ClientPlayerEntity player) {}
+    private void updateXrayBlocks(MinecraftClient client, ClientPlayerEntity player) {}
+    private void updateBlockESP(MinecraftClient client, ClientPlayerEntity player) {}
+    private void drawFullBox(MatrixStack matrices, VertexConsumer lines, Box box, float r, float g, float b, float a) {}
     
     private void lookAt(ClientPlayerEntity player, BlockPos pos) {
         Vec3d target = Vec3d.ofCenter(pos);
@@ -372,8 +359,5 @@ public class Modules {
         player.setYaw((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0F));
         player.setPitch((float) -Math.toDegrees(Math.atan2(dy, dist)));
     }
-
-    private void lookAtEntity(ClientPlayerEntity player, Entity entity) {
-        lookAt(player, entity.getBlockPos());
-    }
+    private void lookAtEntity(ClientPlayerEntity player, Entity entity) { lookAt(player, entity.getBlockPos()); }
 }
