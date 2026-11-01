@@ -16,43 +16,24 @@ public class SmartClient implements ClientModInitializer {
 
     public static Modules modules = new Modules();
     public static KeyBinding keyGui;
-    
-    // Дополнительные клавиши (для быстрого доступа, если не хочешь открывать меню)
     public static KeyBinding keyAutoMine;
     public static KeyBinding keyXray;
     public static KeyBinding keyKillAura;
 
     @Override
     public void onInitializeClient() {
-        addLog("Загрузка SmartMiner v6.0 (Delta Edition)...");
-        
-        // Инициализация модулей
+        addLog("Загрузка SmartMiner v6.0...");
         modules = new Modules();
 
-        // ==========================================
-        // 1. РЕГИСТРАЦИЯ КЛАВИШ
-        // ==========================================
-        keyGui = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.smartminer.gui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.smartminer"));
-        keyAutoMine = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.smartminer.automine", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_R, "category.smartminer"));
-        keyXray = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.smartminer.xray", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.smartminer"));
-        keyKillAura = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.smartminer.killaura", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "category.smartminer"));
+        keyGui = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartminer.gui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.smartminer"));
+        keyAutoMine = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartminer.automine", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_R, "category.smartminer"));
+        keyXray = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartminer.xray", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.smartminer"));
+        keyKillAura = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.smartminer.killaura", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "category.smartminer"));
 
-        // ==========================================
-        // 2. ОБРАБОТКА КЛАВИШ И ТИКОВ
-        // ==========================================
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
 
-            // Открытие GUI на Right Shift
-            while (keyGui.wasPressed()) {
-                client.setScreen(new ClickGui());
-            }
-
-            // Быстрое переключение модулей
+            while (keyGui.wasPressed()) client.setScreen(new ClickGui());
             while (keyAutoMine.wasPressed()) {
                 modules.autoMine = !modules.autoMine;
                 addLog("AutoMine: " + (modules.autoMine ? "§aВКЛ" : "§cВЫКЛ"));
@@ -66,15 +47,9 @@ public class SmartClient implements ClientModInitializer {
                 addLog("KillAura: " + (modules.killAura ? "§aВКЛ" : "§cВЫКЛ"));
             }
 
-            // Основной цикл модулей
-            if (client.world != null) {
-                modules.onTick(client);
-            }
+            if (client.world != null) modules.onTick(client);
         });
 
-        // ==========================================
-        // 3. ОБРАБОТКА ЧАТА (Детектор приватов и парсер)
-        // ==========================================
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (modules != null) modules.onChatMessage(message.getString());
         });
@@ -82,35 +57,25 @@ public class SmartClient implements ClientModInitializer {
             if (modules != null) modules.onChatMessage(message.getString());
         });
 
-        // ==========================================
-        // 4. РЕНДЕР В МИРЕ (ESP, Tracers, X-Ray)
-        // ==========================================
         WorldRenderEvents.END.register(context -> {
             if (modules != null) modules.renderESP(context);
         });
 
-        // ==========================================
-        // 5. РЕНДЕР НА ЭКРАНЕ (HUD, TargetHUD)
-        // ==========================================
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+        // ИСПРАВЛЕНО: Получаем float из RenderTickCounter
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             if (modules != null) {
-                modules.renderHUD(drawContext, tickDelta);
+                modules.renderHUD(drawContext, tickCounter.getTickDelta(false));
             }
         });
 
         addLog("Успешно загружен!");
     }
 
-    /**
-     * Вывод логов в чат и консоль.
-     */
     public static void addLog(String message) {
         System.out.println("[SmartMiner] " + message);
-
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player != null) {
-            Text text = Text.literal("§b[SmartMiner]§r " + message);
-            client.player.sendMessage(text, false);
+            client.player.sendMessage(Text.literal("§b[SmartMiner]§r " + message), false);
         }
     }
 }
